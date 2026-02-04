@@ -9,6 +9,37 @@ const App = {
             window.Notifications.loadUnread();
         }
     },
+
+    checkNotificationBlocking() {
+        const blocker = document.getElementById('notification-blocker');
+        const deniedMsg = document.getElementById('notif-denied-msg');
+        const btn = document.getElementById('btn-enable-notif');
+
+        if (!blocker) return;
+
+        if (!("Notification" in window)) {
+            // Browser doesn't support notifications, let it pass or warn?
+            // For now let pass to avoid breaking purely
+            blocker.classList.add('hidden');
+            return;
+        }
+
+        if (Notification.permission === 'granted') {
+            blocker.classList.add('hidden');
+        } else {
+            blocker.classList.remove('hidden'); // Show blocker
+
+            if (Notification.permission === 'denied') {
+                if (btn) btn.classList.add('hidden');
+                if (deniedMsg) deniedMsg.classList.remove('hidden');
+            } else {
+                // default
+                if (btn) btn.classList.remove('hidden');
+                if (deniedMsg) deniedMsg.classList.add('hidden');
+            }
+        }
+    },
+
     state: {
         user: null,
         viewMode: 'all', // 'all' or 'me'
@@ -31,9 +62,7 @@ const App = {
         this.checkAuth();
         this.initIcons();
 
-        if ("Notification" in window) {
-            Notification.requestPermission();
-        }
+        this.checkNotificationBlocking();
 
         // Global error handler for unhandled promise rejections
         window.addEventListener('unhandledrejection', (event) => {
@@ -154,6 +183,50 @@ const App = {
             if (this.els.notifDropdown && !this.els.notifBtn.contains(e.target) && !this.els.notifDropdown.contains(e.target)) {
                 this.els.notifDropdown.classList.add('hidden');
             }
+            // Close mobile drawer on outside click
+            const drawer = document.getElementById('mobile-menu-drawer');
+            if (drawer && drawer.classList.contains('active') && !drawer.querySelector('.drawer-content').contains(e.target) && !e.target.closest('#mobile-btn-menu')) {
+                drawer.classList.remove('active');
+            }
+        });
+
+        // Mobile Nav Bindings
+        document.getElementById('mobile-btn-add-work')?.addEventListener('click', () => {
+            this.openAddWorkForStaff(this.state.user.id);
+        });
+        document.getElementById('mobile-btn-request')?.addEventListener('click', () => {
+            this.openModal('modal-request');
+            this.initRequestForm();
+        });
+        document.getElementById('mobile-btn-menu')?.addEventListener('click', () => {
+            this.openMobileDrawer();
+        });
+        document.getElementById('close-mobile-menu')?.addEventListener('click', () => {
+            document.getElementById('mobile-menu-drawer').classList.remove('active');
+        });
+        document.getElementById('mobile-btn-logout')?.addEventListener('click', () => this.handleLogout());
+
+        // Admin Mobile Links
+        document.getElementById('mobile-btn-users')?.addEventListener('click', () => {
+            document.getElementById('mobile-menu-drawer').classList.remove('active');
+            this.openModal('modal-users');
+            this.loadUsersTable();
+        });
+        document.getElementById('mobile-btn-routines')?.addEventListener('click', () => {
+            document.getElementById('mobile-menu-drawer').classList.remove('active');
+            this.generateRoutines();
+        });
+
+        // Notification Blocker
+        document.getElementById('btn-enable-notif')?.addEventListener('click', () => {
+            Notification.requestPermission().then(() => {
+                this.checkNotificationBlocking();
+            });
+        });
+
+        // Re-check on focus (in case user changed settings in another tab/window)
+        window.addEventListener('focus', () => {
+            this.checkNotificationBlocking();
         });
     },
 
@@ -192,9 +265,11 @@ const App = {
         if (this.state.user.role === 'Admin') {
             this.els.btnUserMgmt.classList.remove('hidden');
             this.els.btnGenerateRoutines.classList.remove('hidden');
+            this.els.btnAddWork.classList.add('hidden'); // Hide Add Work for Admin
         } else {
             this.els.btnUserMgmt.classList.add('hidden');
             this.els.btnGenerateRoutines.classList.add('hidden');
+            this.els.btnAddWork.classList.remove('hidden');
         }
 
         // Auto Refresh Timeline
@@ -429,25 +504,25 @@ const App = {
 
         // Premium Header
         let html = `
-            <div class="timeline-header" style="display:grid; grid-template-columns: 240px 1fr; background:var(--slate-50); border-bottom:1px solid var(--slate-100);">
-                <div style="padding:1rem; font-weight:600; color:var(--slate-700);">Staff & Performa</div>
-                <div style="padding:1rem; font-weight:600; color:var(--slate-700); display:flex; justify-content:space-between; align-items:center;">
+            <div class="timeline-header">
+                <div class="header-title">Staff & Performa</div>
+                <div class="header-legend">
                     <span>Timeline (${this.state.selectedDate})</span>
-                    <div style="display:flex; gap:1rem; font-size:0.75rem;">
-                         <span style="display:flex;align-items:center;gap:4px;"><div style="width:8px;height:8px;border-radius:50%;background:var(--purple);"></div> Jobdesk</span>
-                         <span style="display:flex;align-items:center;gap:4px;"><div style="width:8px;height:8px;border-radius:50%;background:var(--amber);"></div> Tambahan</span>
-                         <span style="display:flex;align-items:center;gap:4px;"><div style="width:8px;height:8px;border-radius:50%;background:var(--teal);"></div> Inisiatif</span>
-                         <span style="display:flex;align-items:center;gap:4px;"><div style="width:8px;height:8px;border-radius:50%;background:var(--rose);"></div> Request</span>
+                    <div class="legend-items">
+                         <span class="legend-item"><div class="dot" style="background:var(--purple);"></div> Jobdesk</span>
+                         <span class="legend-item"><div class="dot" style="background:var(--amber);"></div> Tambahan</span>
+                         <span class="legend-item"><div class="dot" style="background:var(--teal);"></div> Inisiatif</span>
+                         <span class="legend-item"><div class="dot" style="background:var(--rose);"></div> Request</span>
                     </div>
                 </div>
             </div>
-            <div class="timeline-body" style="max-height:70vh; overflow-y:auto;">
+            <div class="timeline-body custom-scrollbar">
         `;
 
         if (staffList.length === 0) {
             html += `
-                <div style="padding:3rem; text-align:center; color:var(--slate-400);">
-                    <i data-lucide="calendar-x" style="width:48px;height:48px;margin-bottom:1rem;display:inline-block;"></i>
+                <div class="empty-state-timeline">
+                    <i data-lucide="calendar-x"></i>
                     <p>Tidak ada staff yang ditemukan.</p>
                 </div>
             `;
@@ -463,28 +538,28 @@ const App = {
                 const percentColor = percent === 100 ? 'var(--success)' : 'var(--primary)';
 
                 html += `
-                    <div class="staff-row" style="display:grid; grid-template-columns: 240px 1fr; min-height:140px; border-bottom:1px solid var(--slate-100); ${isMe ? 'background:var(--primary-bg);' : ''}">
+                    <div class="staff-row ${isMe ? 'is-me' : ''}">
                          <!-- PROFILE -->
-                         <div style="padding:1rem; display:flex; flex-direction:column; justify-content:center; border-right:1px solid var(--slate-100); background:rgba(255,255,255,0.9); position:sticky; left:0; z-index:10;">
-                            <div style="display:flex; align-items:center; gap:0.75rem; margin-bottom:0.75rem;">
-                                <div style="position:relative;">
-                                    <img src="${user.avatar}" style="width:40px; height:40px; border-radius:50%; background:var(--slate-100);">
-                                    ${isMe ? '<div style="position:absolute; bottom:-2px; right:-2px; background:var(--primary); color:white; width:14px; height:14px; border-radius:50%; font-size:8px; display:flex; align-items:center; justify-content:center; border:2px solid white;">★</div>' : ''}
+                         <div class="staff-profile">
+                            <div class="staff-profile-header">
+                                <div class="staff-avatar-wrapper">
+                                    <img src="${user.avatar}" class="staff-avatar">
+                                    ${isMe ? '<div class="me-badge">★</div>' : ''}
                                 </div>
-                                <div>
-                                    <div style="font-weight:700; color:var(--slate-800); font-size:0.875rem;">${user.name}</div>
-                                    <div style="font-size:10px; color:var(--slate-500); text-transform:uppercase; background:var(--slate-100); padding:2px 6px; border-radius:4px; display:inline-block; margin-top:2px;">${user.role}</div>
+                                <div class="staff-info">
+                                    <div class="staff-name">${user.name}</div>
+                                    <div class="staff-role">${user.role}</div>
                                 </div>
                             </div>
-                             <div style="background:var(--slate-50); padding:0.6rem; border-radius:0.5rem; border:1px solid var(--slate-200);">
-                               <div style="display:flex; justify-content:space-between; margin-bottom:4px;">
-                                  <span style="font-size:10px; font-weight:700; color:var(--slate-500);">PERFORMA</span>
-                                  <span style="font-size:12px; font-weight:700; color:${percent === 100 ? 'var(--success)' : 'var(--slate-700)'};">${percent}%</span>
+                             <div class="staff-performance">
+                               <div class="perf-header">
+                                  <span class="perf-label">PERFORMA</span>
+                                  <span class="perf-value" style="color:${percent === 100 ? 'var(--success)' : 'var(--slate-700)'};">${percent}%</span>
                                </div>
-                               <div style="width:100%; background:var(--slate-200); height:6px; border-radius:99px; overflow:hidden;">
-                                  <div style="height:100%; transition:all 0.5s; background:${percentColor}; width:${percent}%"></div>
+                               <div class="perf-bar-bg">
+                                  <div class="perf-bar-fill" style="background:${percentColor}; width:${percent}%"></div>
                                </div>
-                               <div style="font-size:9px; color:var(--slate-400); margin-top:4px; display:flex; justify-content:space-between;">
+                               <div class="perf-stats">
                                  <span>${completed} Selesai</span>
                                  <span>${total} Total</span>
                                </div>
@@ -492,7 +567,7 @@ const App = {
                          </div>
 
                          <!-- TASKS -->
-                         <div class="custom-scrollbar" style="padding:1rem; display:flex; align-items:center; gap:1rem; overflow-x:auto;">
+                         <div class="tasks-column custom-scrollbar">
                 `;
 
                 if (userTasks.length > 0) {
@@ -532,76 +607,58 @@ const App = {
     },
 
     renderTaskCard(task) {
-        const style = this.getCategoryStyle(task.category);
+        const styleClass = this.getCategoryClass(task.category);
         const checklist = task.checklist || [];
         const doneCount = checklist.filter(c => c.is_done == 1).length;
         const totalCount = checklist.length;
         const progress = totalCount > 0 ? Math.round((doneCount / totalCount) * 100) : 0;
+        const doneClass = task.status === 'done' ? 'done' : '';
 
         let statusIcon = 'circle';
-        let statusClass = 'text-slate-400 bg-slate-100 border-slate-200';
-        if (task.status === 'done') {
-            statusIcon = 'check-circle-2';
-            statusClass = 'text-success bg-green-100 border-green-200';
-        } else if (task.status === 'in-progress') {
-            statusIcon = 'play-circle';
-            statusClass = 'text-info bg-blue-100 border-blue-200';
-        }
+        if (task.status === 'done') statusIcon = 'check-circle-2';
+        else if (task.status === 'in-progress') statusIcon = 'play-circle';
 
         return `
-            <div onclick="App.openTaskDetail(${task.id})" class="task-card-premium" style="
-                flex-shrink:0; width:260px; padding:0.8rem; border-radius:0.75rem; border:1px solid; cursor:pointer; transition:all 0.2s; background:white; display:flex; flex-direction:column; justify-content:space-between; position:relative;
-                ${style} ${task.status === 'done' ? 'opacity: 0.5; filter: grayscale(100%);' : ''}
-            ">
-                <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:0.5rem;">
-                     <span style="font-size:10px; font-weight:700; text-transform:uppercase; display:flex; align-items:center; gap:4px; padding:2px 6px; border-radius:4px; background:rgba(255,255,255,0.6); border:1px solid rgba(0,0,0,0.05);">
-                        <i data-lucide="${this.getCategoryIcon(task.category)}" style="width:10px;height:10px;"></i> ${task.category}
+            <div onclick="App.openTaskDetail(${task.id})" class="task-card ${styleClass} ${doneClass}">
+                <div class="task-header">
+                     <span class="category-badge ${styleClass}">
+                        <i data-lucide="${this.getCategoryIcon(task.category)}"></i> ${task.category}
                      </span>
-                     <div style="font-size:10px; font-weight:700; text-transform:uppercase; padding:2px 6px; border-radius:99px; border:1px solid transparent; display:flex; align-items:center; gap:4px; border:1px solid; ${task.status === 'done' ? 'background:#dcfce7;color:#15803d;border-color:#bbf7d0;' : task.status === 'in-progress' ? 'background:#dbeafe;color:#1d4ed8;border-color:#bfdbfe;' : 'background:#f1f5f9;color:#64748b;border-color:#e2e8f0;'}">
-                           <i data-lucide="${statusIcon}" style="width:10px;height:10px;"></i>
+                     <div class="status-badge ${task.status}">
+                           <i data-lucide="${statusIcon}"></i>
                            ${task.status.replace('-', ' ')}
                      </div>
                 </div>
 
-                <div style="font-weight:700; color:var(--slate-800); font-size:0.875rem; margin-bottom:0.5rem; line-height:1.3; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden;">
+                <div class="task-title">
                     ${task.title}
                 </div>
 
-                <div style="display:flex; align-items:center; gap:4px; font-size:10px; color:var(--slate-500); margin-bottom:0.5rem;">
-                    <i data-lucide="clock" style="width:10px;height:10px;"></i> ${this.formatTime(task.start_time)} - ${this.formatTime(task.end_time)}
+                <div class="task-time">
+                    <i data-lucide="clock"></i> ${this.formatTime(task.start_time)} - ${this.formatTime(task.end_time)}
                 </div>
 
-                <div style="width:100%; background:rgba(255,255,255,0.5); height:4px; border-radius:99px; overflow:hidden; margin-bottom:4px;">
-                    <div style="height:100%; width:${progress}%; background:currentColor; opacity:0.7;"></div>
-                </div>
-                <div style="display:flex; justify-content:space-between; font-size:9px; opacity:0.7;">
-                    <span>${doneCount}/${totalCount} Check</span>
-                    ${(task.comment_count > 0) ? '<span style="display:flex;align-items:center;gap:2px"><i data-lucide="message-square" style="width:8px;height:8px"></i> Info</span>' : ''}
+                <div class="task-progress">
+                    <div class="task-progress-bar">
+                        <div class="fill" style="width:${progress}%"></div>
+                    </div>
+                    <div class="task-progress-info">
+                        <span>${doneCount}/${totalCount} Check</span>
+                        ${(task.comment_count > 0) ? '<span style="display:flex;align-items:center;gap:2px"><i data-lucide="message-square" style="width:8px;height:8px"></i> Info</span>' : ''}
+                    </div>
                 </div>
             </div>
         `;
     },
 
     getCategoryStyle(category) {
-        const color = this.getCategoryColor(category);
-        const map = {
-            'rose': 'background-color:#fff1f2; border-color:#fecdd3; color:#be123c;',
-            'amber': 'background-color:#fffbeb; border-color:#fde68a; color:#b45309;',
-            'teal': 'background-color:#f0fdfa; border-color:#99f6e4; color:#0f766e;',
-            'purple': 'background-color:#faf5ff; border-color:#ddd6fe; color:#7e22ce;',
-            'primary': 'background-color:#eef2ff; border-color:#c7d2fe; color:#4338ca;'
-        };
-        return map[color] || map['primary'];
+        // Deprecated, keeping for safety if called elsewhere, but we rely on classes now
+        return '';
     },
 
     getCategoryColor(category) {
-        switch (category) {
-            case 'Request': return 'rose';
-            case 'Tugas Tambahan': return 'amber';
-            case 'Inisiatif': return 'teal';
-            case 'Jobdesk': return 'purple';
-            default: return 'primary';
-        }
+        // Deprecated mainly
+        return this.getCategoryClass(category);
     },
 
     updateCurrentTimeLine() {
@@ -1087,6 +1144,8 @@ const App = {
     },
 
     getCategoryClass(cat) {
+        if (!cat) return '';
+        if (cat === 'Tugas Tambahan') return 'tambahan';
         return cat.toLowerCase().replace(' ', '-');
     },
 
@@ -1318,6 +1377,10 @@ const App = {
 
     initRequestForm() {
         document.getElementById('form-request').reset();
+        document.getElementById('request-staff-timeline').innerHTML = '<p class="text-muted text-center" style="padding:20px;">Pilih staff untuk melihat jadwal</p>';
+
+        const dateEl = document.getElementById('req-schedule-date');
+        if (dateEl) dateEl.textContent = this.state.selectedDate || 'Hari Ini';
 
         // Show who is requesting
         const fromDeptEl = document.getElementById('request-from-dept');
@@ -1326,9 +1389,12 @@ const App = {
         }
 
         // Populate staff select options
-        const select = document.getElementById('request-to'); // Fixed ID from 'req-assign-to' to 'request-to'
+        const select = document.getElementById('request-to');
         if (select) {
             select.innerHTML = '<option value="">Memuat staff...</option>';
+            // Bind change event to load schedule
+            select.onchange = (e) => this.loadStaffScheduleForRequest(e.target.value);
+
             // Fetch all users except admin (or include admin if needed)
             API.getUsers({ department: 'All' }).then(res => {
                 select.innerHTML = '<option value="">Pilih Staff...</option>';
@@ -1346,12 +1412,128 @@ const App = {
         }
     },
 
+    async loadStaffScheduleForRequest(staffId) {
+        const container = document.getElementById('request-staff-timeline');
+        if (!staffId) {
+            container.innerHTML = '<p class="text-muted text-center" style="padding:20px;">Pilih staff untuk melihat jadwal</p>';
+            return;
+        }
+
+        container.innerHTML = '<div class="text-center p-4"><div class="loading-spinner" style="width:24px;height:24px;border-width:2px;margin:0 auto;"></div></div>';
+
+        try {
+            const date = this.state.selectedDate || new Date().toISOString().split('T')[0];
+            const res = await API.getTasks({ staff_id: staffId, date: date });
+
+            // Handle new API response structure (timeline vs tasks)
+            let tasks = [];
+            if (res.timeline && res.timeline.length > 0) {
+                tasks = res.timeline[0].tasks || [];
+            } else if (res.tasks) {
+                tasks = res.tasks;
+            }
+
+            this.renderRequestSchedule(tasks);
+        } catch (e) {
+            container.innerHTML = `<p class="text-danger text-center">Gagal memuat jadwal: ${e.message}</p>`;
+        }
+    },
+
+    renderRequestSchedule(tasks) {
+        const container = document.getElementById('request-staff-timeline');
+        if (!tasks || tasks.length === 0) {
+            container.innerHTML = `
+                <div class="empty-state">
+                    <i data-lucide="calendar-check" style="width:24px;height:24px;margin-bottom:8px;color:var(--success);"></i>
+                    <p style="font-size:0.8rem;">Jadwal Kosong. Aman untuk request!</p>
+                </div>
+             `;
+            this.initIcons();
+            return;
+        }
+
+        // Sort by time
+        tasks.sort((a, b) => (a.start_time || '').localeCompare(b.start_time || ''));
+
+        let html = '';
+        tasks.forEach(task => {
+            const styleClass = this.getCategoryClass(task.category);
+
+            // Calculate Progress
+            const checklist = task.checklist || [];
+            const doneCount = checklist.filter(c => c.is_done == 1).length;
+            const totalCount = checklist.length;
+            const progress = totalCount > 0 ? Math.round((doneCount / totalCount) * 100) : 0;
+
+            // Status Styling
+            let statusColor = 'var(--slate-500)';
+            let statusBg = 'var(--slate-100)';
+            let statusIcon = 'circle';
+
+            if (task.status === 'in-progress') {
+                statusColor = 'var(--info)';
+                statusBg = 'var(--info-bg)';
+                statusIcon = 'loader';
+            } else if (task.status === 'done') {
+                statusColor = 'var(--success)';
+                statusBg = 'var(--success-bg)';
+                statusIcon = 'check-circle-2';
+            }
+
+            const isDone = task.status === 'done';
+
+            html += `
+                <div class="mini-task-item ${styleClass}" style="
+                    margin-bottom:8px; 
+                    border-left: 3px solid ${isDone ? 'var(--success)' : 'var(--slate-300)'};
+                    opacity: ${isDone ? '0.7' : '1'};
+                    background: ${isDone ? '#f8fafc' : 'white'};
+                ">
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 6px;">
+                        <span class="category-badge ${styleClass}" style="font-size:0.6rem; padding:2px 6px;">
+                           ${task.category}
+                        </span>
+                        <div style="
+                            display:flex; align-items:center; gap:4px; 
+                            font-size:0.65rem; font-weight:700; 
+                            background:${statusBg}; color:${statusColor}; 
+                            padding:2px 8px; border-radius:10px;
+                        ">
+                            <i data-lucide="${statusIcon}" style="width:10px; height:10px;"></i>
+                            ${task.status.replace('-', ' ').toUpperCase()}
+                        </div>
+                    </div>
+
+                    <div style="font-size:0.85rem; font-weight:600; color:var(--slate-800); margin-bottom:4px; line-height:1.3;">
+                        ${task.title}
+                    </div>
+
+                    <div style="display:flex; justify-content:space-between; align-items:center; border-top:1px solid var(--slate-100); padding-top:4px; margin-top:4px;">
+                        <div style="font-size:0.7rem; font-family:monospace; color:var(--slate-500); display:flex; align-items:center; gap:4px;">
+                            <i data-lucide="clock" style="width:10px; height:10px;"></i>
+                            ${this.formatTime(task.start_time)} - ${this.formatTime(task.end_time)}
+                        </div>
+                        
+                        ${totalCount > 0 ? `
+                        <div style="font-size:0.7rem; color:${progress === 100 ? 'var(--success)' : 'var(--slate-500)'}; font-weight:600;">
+                            ${doneCount}/${totalCount} (${progress}%)
+                        </div>
+                        ` : ''}
+                    </div>
+                </div>
+            `;
+        });
+
+        container.innerHTML = html;
+        this.initIcons();
+    },
+
     async handleRequest(e) {
         e.preventDefault();
-        const title = document.getElementById('req-title').value;
-        const desc = document.getElementById('req-desc').value;
-        const targetId = document.getElementById('req-assign-to').value;
-        const deadline = document.getElementById('req-deadline').value;
+        const title = document.getElementById('request-title').value; // Corrected ID from req-title
+        const desc = document.getElementById('request-notes').value; // Corrected ID from req-desc
+        const targetId = document.getElementById('request-to').value; // Corrected ID from req-assign-to
+        const deadline = document.getElementById('request-deadline').value; // Corrected ID from req-deadline
 
         if (!targetId) {
             this.showToast('Pilih staff tujuan', 'warning');
@@ -1376,6 +1558,31 @@ const App = {
         } catch (error) {
             this.showToast('Gagal kirim request: ' + error.message, 'error');
         }
+    },
+
+    openMobileDrawer() {
+        const drawer = document.getElementById('mobile-menu-drawer');
+        const user = this.state.user;
+        if (!drawer || !user) return;
+
+        // Populate drawer user info
+        const avatarEl = document.getElementById('drawer-avatar');
+        if (avatarEl) {
+            if (user.avatar) {
+                avatarEl.innerHTML = `<img src="${user.avatar}" style="width:100%;height:100%;object-fit:cover;border-radius:50%">`;
+            } else {
+                avatarEl.innerHTML = user.name.charAt(0).toUpperCase();
+            }
+        }
+        document.getElementById('drawer-username').textContent = user.name;
+        document.getElementById('drawer-role').textContent = user.role;
+
+        // Show/Hide admin links
+        const isAdmin = user.role === 'Admin';
+        document.getElementById('mobile-btn-users').classList.toggle('hidden', !isAdmin);
+        document.getElementById('mobile-btn-routines').classList.toggle('hidden', !isAdmin);
+
+        drawer.classList.add('active');
     }
 };
 

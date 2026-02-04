@@ -150,6 +150,52 @@
                 <!-- Timeline will be rendered here -->
             </div>
         </main>
+
+        <!-- Mobile Bottom Navigation (Simple Version) -->
+        <nav class="mobile-bottom-nav simple-nav">
+             <button class="btn btn-outline nav-btn-mobile" id="mobile-btn-request" style="flex:1; margin-right:8px;">
+                <i data-lucide="send"></i>
+                <span>Request</span>
+            </button>
+
+             <button class="btn btn-primary nav-btn-mobile" id="mobile-btn-add-work" style="flex:1;">
+                <i data-lucide="plus-circle"></i>
+                <span>Tambah Pekerjaan</span>
+            </button>
+        </nav>
+        
+        <!-- Mobile Menu Drawer (Side or Bottom) -->
+        <div id="mobile-menu-drawer" class="mobile-drawer hidden">
+             <div class="drawer-header">
+                <h3>Menu</h3>
+                <button class="drawer-close" id="close-mobile-menu"><i data-lucide="x"></i></button>
+             </div>
+             <div class="drawer-content">
+                 <div class="user-card-drawer">
+                     <div class="avatar-circle" id="drawer-avatar"></div>
+                     <div class="user-details">
+                         <strong id="drawer-username">User</strong>
+                         <span id="drawer-role">Role</span>
+                     </div>
+                 </div>
+                 
+                 <div class="drawer-links">
+                     <!-- Admin Links -->
+                     <button id="mobile-btn-users" class="drawer-link hidden">
+                         <i data-lucide="users"></i> Management Users
+                     </button>
+                     <button id="mobile-btn-routines" class="drawer-link hidden">
+                         <i data-lucide="refresh-cw"></i> Generate Rutinitas
+                     </button>
+                     
+                     <div class="drawer-divider"></div>
+                     
+                     <button id="mobile-btn-logout" class="drawer-link text-danger">
+                         <i data-lucide="log-out"></i> Logout
+                     </button>
+                 </div>
+             </div>
+        </div>
     </div>
 
     <!-- Modals -->
@@ -244,7 +290,7 @@
     </div>
 
     <!-- Request Modal -->
-    <div id="modal-request" class="modal hidden">
+    <div id="modal-request" class="modal modal-xl hidden">
         <div class="modal-header">
             <h3>Request ke Tim Lain</h3>
             <button class="modal-close" data-modal="modal-request">
@@ -252,39 +298,52 @@
             </button>
         </div>
         <div class="modal-body">
-            <div class="alert alert-rose">
-                <i data-lucide="alert-circle"></i>
-                <p>Anda me-request sebagai <b id="request-from-dept"></b>. Tugas akan masuk ke antrean staff tujuan.</p>
+            <div class="request-modal-grid">
+                <!-- LEft: Form -->
+                <div class="request-form-section">
+                    <div class="alert alert-rose">
+                        <i data-lucide="alert-circle"></i>
+                        <p>Anda me-request sebagai <b id="request-from-dept"></b>. Tugas akan masuk ke antrean staff tujuan.</p>
+                    </div>
+                    
+                    <form id="form-request">
+                        <div class="form-group">
+                            <label>Request Ke Siapa?</label>
+                            <select id="request-to" required>
+                                <option value="">Pilih Staff...</option>
+                            </select>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label>Judul Tugas</label>
+                            <input type="text" id="request-title" required>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label>Detail (Enter untuk baris baru)</label>
+                            <textarea id="request-notes" rows="3"></textarea>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label>Deadline Jam</label>
+                            <input type="time" id="request-deadline" value="17:00">
+                        </div>
+                        
+                        <button type="submit" class="btn btn-rose btn-block">
+                            <i data-lucide="send"></i>
+                            <span>Kirim Request</span>
+                        </button>
+                    </form>
+                </div>
+
+                <!-- Right: Schedule Visual -->
+                <div class="request-schedule-section">
+                    <h4>Jadwal Staff Hari Ini (<span id="req-schedule-date"></span>)</h4>
+                    <div id="request-staff-timeline" class="mini-timeline custom-scrollbar" style="max-height: 400px; overflow-y: auto;">
+                        <p class="text-muted text-center" style="padding:20px;">Pilih staff untuk melihat jadwal</p>
+                    </div>
+                </div>
             </div>
-            
-            <form id="form-request">
-                <div class="form-group">
-                    <label>Request Ke Siapa?</label>
-                    <select id="request-to" required>
-                        <option value="">Pilih Staff...</option>
-                    </select>
-                </div>
-                
-                <div class="form-group">
-                    <label>Judul Tugas</label>
-                    <input type="text" id="request-title" required>
-                </div>
-                
-                <div class="form-group">
-                    <label>Detail (Enter untuk baris baru)</label>
-                    <textarea id="request-notes" rows="3"></textarea>
-                </div>
-                
-                <div class="form-group">
-                    <label>Deadline Jam</label>
-                    <input type="time" id="request-deadline" value="17:00">
-                </div>
-                
-                <button type="submit" class="btn btn-rose btn-block">
-                    <i data-lucide="send"></i>
-                    <span>Kirim Request</span>
-                </button>
-            </form>
         </div>
     </div>
 
@@ -341,6 +400,25 @@
                 </div>
                 <button type="submit" class="btn btn-primary btn-block">Simpan User</button>
             </form>
+        </div>
+    </div>
+
+    <!-- Notification Blocker Overlay -->
+    <div id="notification-blocker" class="modal-overlay hidden" style="z-index: 9999; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,0.9);">
+        <div class="modal-content" style="background: white; padding: 2rem; border-radius: 12px; max-width: 400px; text-align: center;">
+            <div style="width: 60px; height: 60px; background: #fee2e2; color: #ef4444; border-radius: 50%; display: flex; align-items: center; justify-content: center; margin: 0 auto 1.5rem;">
+                <i data-lucide="bell-off" style="width: 32px; height: 32px;"></i>
+            </div>
+            <h2 style="font-size: 1.5rem; font-weight: 700; margin-bottom: 0.5rem; color: #1f2937;">Notifikasi Wajib!</h2>
+            <p id="notif-blocker-msg" style="color: #4b5563; margin-bottom: 1.5rem; line-height: 1.5;">
+                Aplikasi ini membutuhkan notifikasi agar Anda tidak melewatkan tugas penting.
+            </p>
+            <button id="btn-enable-notif" class="btn btn-primary btn-block" style="width: 100%; justify-content: center;">
+                <i data-lucide="bell"></i> Aktifkan Notifikasi
+            </button>
+            <p id="notif-denied-msg" class="hidden" style="color: #ef4444; margin-top: 1rem; font-size: 0.875rem;">
+                Notifikasi diblokir browser. Mohon izinkan via pengaturan browser (icon (i) di URL bar) Pojok Kiri.
+            </p>
         </div>
     </div>
 

@@ -215,7 +215,7 @@ function createTask() {
     $endTime = $input['end_time'] ?? '';
     $targetStaffId = $input['staff_id'] ?? getCurrentUser()['id'];
     
-    if (!canAccessStaff($targetStaffId)) {
+    if ($category !== 'Request' && !canAccessStaff($targetStaffId)) {
         jsonResponse(['success' => false, 'message' => 'Access denied'], 403);
     }
     
