@@ -261,12 +261,53 @@ const App = {
                 if (result.csrf_token) API.setCSRFToken(result.csrf_token);
                 this.showMain();
                 if (window.NotificationManager) window.NotificationManager.init();
+                this.populateDepartments();
             } else {
                 this.showLogin();
             }
         } catch (error) {
             this.showLogin();
             this.showToast('Gagal cek login: ' + error.message, 'error');
+        }
+    },
+
+    async populateDepartments() {
+        try {
+            // Populate #dept-filter and user form #user-role
+            const res = await API.getDepartments();
+            if (res.departments) {
+                const depts = res.departments;
+
+                // 1. Dept Filter (Timeline)
+                const filterEl = document.getElementById('dept-filter');
+                if (filterEl) {
+                    const currentVal = filterEl.value;
+                    filterEl.innerHTML = '<option value="All">Semua Divisi</option>';
+                    depts.forEach(d => {
+                        const opt = document.createElement('option');
+                        opt.value = d;
+                        opt.textContent = d;
+                        filterEl.appendChild(opt);
+                    });
+                    filterEl.value = currentVal;
+                }
+
+                // 2. User Form Role Select
+                const roleEl = document.getElementById('user-role');
+                if (roleEl) {
+                    roleEl.innerHTML = '<option value="">Pilih Role...</option><option value="Admin">Admin</option>';
+                    depts.forEach(d => {
+                        const opt = document.createElement('option');
+                        opt.value = d;
+                        opt.textContent = d;
+                        roleEl.appendChild(opt);
+                    });
+                }
+
+                this.state.departments = depts;
+            }
+        } catch (e) {
+            console.error('Failed to load departments', e);
         }
     },
 
@@ -1109,29 +1150,165 @@ const App = {
     },
 
     async loadUsersTable() {
-        // Admin User Mgmt logic...
         try {
             const res = await API.getUsers();
             const list = document.getElementById('users-table-container');
-            list.innerHTML = res.users.map(u => `<div>${u.name} (${u.role})</div>`).join('');
-        } catch (e) { }
+
+            if (!res.users || res.users.length === 0) {
+                list.innerHTML = '<div class="p-4 text-center text-slate-500">Belum ada user.</div>';
+                return;
+            }
+
+            let html = `
+                <table style="width:100%; border-collapse:separate; border-spacing:0 8px;">
+                    <thead>
+                        <tr style="color:var(--slate-500); font-size:12px; text-transform:uppercase; letter-spacing:0.5px;">
+                            <th style="padding:0 16px; text-align:left;">Staff</th>
+                            <th style="padding:0 16px; text-align:left;">Role & Divisi</th>
+                            <th style="padding:0 16px; text-align:left;">Status</th>
+                            <th style="padding:0 16px; text-align:right;">Aksi</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+            `;
+
+            res.users.forEach(u => {
+                const avatar = u.avatar || `https://ui-avatars.com/api/?name=${u.name}&background=random`;
+                const isActive = u.is_active == 1;
+
+                html += `
+                    <tr style="background:white; box-shadow:0 1px 3px rgba(0,0,0,0.05); border-radius:8px;">
+                        <td style="padding:12px 16px; border-radius:8px 0 0 8px;">
+                            <div style="display:flex; align-items:center; gap:12px;">
+                                <img src="${avatar}" style="width:40px; height:40px; border-radius:50%; object-fit:cover; border:2px solid var(--slate-100);">
+                                <div>
+                                    <div style="font-weight:600; color:var(--slate-800);">${u.name}</div>
+                                    <div style="font-size:12px; color:var(--slate-500);">@${u.username}</div>
+                                </div>
+                            </div>
+                        </td>
+                        <td style="padding:12px 16px;">
+                            <span class="category-badge ${this.getCategoryClass(u.role === 'Admin' ? 'Admin' : u.role)}" style="font-size:11px;">
+                                ${u.role}
+                            </span>
+                        </td>
+                        <td style="padding:12px 16px;">
+                            <button onclick="App.toggleUserStatus(${u.id})" class="btn-xs" style="
+                                padding:4px 10px; border-radius:99px; font-size:11px; font-weight:600; 
+                                border:none; cursor:pointer; 
+                                background:${isActive ? '#dcfce7' : '#f1f5f9'}; 
+                                color:${isActive ? '#15803d' : '#64748b'};
+                            ">
+                                ${isActive ? '● Aktif' : '○ Non-Aktif'}
+                            </button>
+                        </td>
+                        <td style="padding:12px 16px; text-align:right; border-radius:0 8px 8px 0;">
+                            <div style="display:flex; justify-content:flex-end; gap:8px;">
+                                <button onclick="App.editUser(${u.id})" class="icon-btn-sm" title="Edit" style="color:var(--primary);">
+                                    <i data-lucide="edit-2" style="width:16px;"></i>
+                                </button>
+                                ${u.role !== 'Admin' ? `
+                                <button onclick="App.deleteUser(${u.id})" class="icon-btn-sm" title="Hapus" style="color:var(--rose-500);">
+                                    <i data-lucide="trash-2" style="width:16px;"></i>
+                                </button>
+                                ` : ''}
+                            </div>
+                        </td>
+                    </tr>
+                `;
+            });
+
+            html += '</tbody></table>';
+            list.innerHTML = html;
+            this.initIcons();
+        } catch (e) {
+            console.error(e);
+            this.showToast('Gagal memuat user', 'error');
+        }
+    },
+
+    async toggleUserStatus(id) {
+        try {
+            await API.toggleUserStatus(id);
+            this.loadUsersTable();
+            this.showToast('Status user diubah', 'success');
+        } catch (e) {
+            this.showToast(e.message, 'error');
+        }
+    },
+
+    async deleteUser(id) {
+        this.showConfirm('Hapus user ini? Data tugas mereka juga akan terhapus.', async () => {
+            try {
+                await API.deleteUser(id);
+                this.loadUsersTable();
+                this.showToast('User dihapus', 'success');
+            } catch (e) {
+                this.showToast(e.message, 'error');
+            }
+        });
+    },
+
+    async editUser(id) {
+        try {
+            const res = await API.getUser(id);
+            if (res.success) {
+                const u = res.user;
+                document.getElementById('user-id').value = u.id;
+
+                const unameEl = document.getElementById('user-username');
+                unameEl.value = u.username;
+                unameEl.disabled = true;
+                unameEl.title = "Username tidak dapat diubah";
+                unameEl.classList.add('bg-slate-100');
+
+                document.getElementById('user-name').value = u.name;
+                document.getElementById('user-role').value = u.role;
+                document.getElementById('user-password').value = '';
+                document.getElementById('password-hint').textContent = '(Isi hanya jika ingin ganti password)';
+
+                document.getElementById('user-form-title').textContent = 'Edit User';
+                document.getElementById('modal-user-form').classList.remove('hidden');
+            }
+        } catch (e) {
+            this.showToast('Error: ' + e.message, 'error');
+        }
     },
 
     openUserForm() {
+        document.getElementById('form-user').reset();
+        document.getElementById('user-id').value = '';
+
+        const unameEl = document.getElementById('user-username');
+        unameEl.disabled = false;
+        unameEl.title = "";
+        unameEl.classList.remove('bg-slate-100');
+
+        document.getElementById('password-hint').textContent = '(Wajib diisi untuk user baru)';
+        document.getElementById('user-form-title').textContent = 'Tambah User';
         document.getElementById('modal-user-form').classList.remove('hidden');
     },
 
     async handleUserSubmit(e) {
         e.preventDefault();
+        const id = document.getElementById('user-id').value;
         const username = document.getElementById('user-username').value;
         const name = document.getElementById('user-name').value;
         const role = document.getElementById('user-role').value;
         const password = document.getElementById('user-password').value;
-        const phone = document.getElementById('user-phone').value;
+
+        const data = { name, role, password };
+        if (!id) data.username = username;
+        if (id) data.id = id;
 
         try {
-            await API.createUser({ username, name, role, password, phone });
-            this.showToast('User berhasil dibuat', 'success');
+            if (id) {
+                await API.updateUser(data);
+                this.showToast('User berhasil diupdate', 'success');
+            } else {
+                await API.createUser(data);
+                this.showToast('User berhasil dibuat', 'success');
+            }
             this.closeModal('modal-user-form');
             this.loadUsersTable();
         } catch (error) {
@@ -1141,28 +1318,31 @@ const App = {
 
     initRequestForm() {
         document.getElementById('form-request').reset();
-        // Populate staff select
-        const select = document.getElementById('req-assign-to');
+
+        // Show who is requesting
+        const fromDeptEl = document.getElementById('request-from-dept');
+        if (fromDeptEl && this.state.user) {
+            fromDeptEl.textContent = this.state.user.role;
+        }
+
+        // Populate staff select options
+        const select = document.getElementById('request-to'); // Fixed ID from 'req-assign-to' to 'request-to'
         if (select) {
-            select.innerHTML = '';
-            // Get unique staff from timeline or fetch
-            // Fallback: use current timeline staff
-            const staff = new Map();
-            if (this.state.tasks && this.state.tasks.length > 0) {
-                this.state.tasks.forEach(t => {
-                    if (t.staff_id) staff.set(t.staff_id, t.staff_name);
-                });
-            }
-            if (staff.size === 0) {
-                select.innerHTML = '<option value="">No staff loaded</option>';
-            } else {
-                staff.forEach((name, id) => {
-                    const opt = document.createElement('option');
-                    opt.value = id;
-                    opt.textContent = name;
-                    select.appendChild(opt);
-                });
-            }
+            select.innerHTML = '<option value="">Memuat staff...</option>';
+            // Fetch all users except admin (or include admin if needed)
+            API.getUsers({ department: 'All' }).then(res => {
+                select.innerHTML = '<option value="">Pilih Staff...</option>';
+                if (res.users) {
+                    res.users.forEach(u => {
+                        if (u.id != this.state.user.id && u.role !== 'Admin') {
+                            const opt = document.createElement('option');
+                            opt.value = u.id;
+                            opt.textContent = `${u.name} (${u.role})`;
+                            select.appendChild(opt);
+                        }
+                    });
+                }
+            });
         }
     },
 
