@@ -1379,14 +1379,28 @@ const App = {
         document.getElementById('form-request').reset();
         document.getElementById('request-staff-timeline').innerHTML = '<p class="text-muted text-center" style="padding:20px;">Pilih staff untuk melihat jadwal</p>';
 
+        // Set Default Date
+        const today = new Date().toISOString().split('T')[0];
+        const defaultDate = this.state.selectedDate || today;
+        document.getElementById('request-date').value = defaultDate;
+
         const dateEl = document.getElementById('req-schedule-date');
-        if (dateEl) dateEl.textContent = this.state.selectedDate || 'Hari Ini';
+        if (dateEl) dateEl.textContent = defaultDate;
 
         // Show who is requesting
         const fromDeptEl = document.getElementById('request-from-dept');
         if (fromDeptEl && this.state.user) {
             fromDeptEl.textContent = this.state.user.role;
         }
+
+        // Bind Date Change to reload schedule
+        document.getElementById('request-date').onchange = (e) => {
+            const staffId = document.getElementById('request-to').value;
+            if (dateEl) dateEl.textContent = e.target.value;
+            if (staffId) {
+                this.loadStaffScheduleForRequest(staffId);
+            }
+        };
 
         // Populate staff select options
         const select = document.getElementById('request-to');
@@ -1422,7 +1436,9 @@ const App = {
         container.innerHTML = '<div class="text-center p-4"><div class="loading-spinner" style="width:24px;height:24px;border-width:2px;margin:0 auto;"></div></div>';
 
         try {
-            const date = this.state.selectedDate || new Date().toISOString().split('T')[0];
+            // Use the date selected in the form, not the global state
+            const formDate = document.getElementById('request-date').value;
+            const date = formDate || this.state.selectedDate || new Date().toISOString().split('T')[0];
             const res = await API.getTasks({ staff_id: staffId, date: date });
 
             // Handle new API response structure (timeline vs tasks)
@@ -1534,6 +1550,7 @@ const App = {
         const desc = document.getElementById('request-notes').value; // Corrected ID from req-desc
         const targetId = document.getElementById('request-to').value; // Corrected ID from req-assign-to
         const deadline = document.getElementById('request-deadline').value; // Corrected ID from req-deadline
+        const reqDate = document.getElementById('request-date').value;
 
         if (!targetId) {
             this.showToast('Pilih staff tujuan', 'warning');
@@ -1541,6 +1558,10 @@ const App = {
         }
 
         try {
+            // Determine Start Time default (09:00 if future date, now if today)
+            const today = new Date().toISOString().split('T')[0];
+            const startTime = (reqDate === today) ? new Date().toTimeString().substring(0, 5) : '09:00';
+
             // Create task as request
             await API.createTask({
                 title: title,
@@ -1548,8 +1569,8 @@ const App = {
                 staff_id: targetId,
                 category: 'Request',
                 end_time: deadline || '17:00',
-                start_time: new Date().toTimeString().substring(0, 5),
-                task_date: this.state.selectedDate,
+                start_time: startTime,
+                task_date: reqDate || this.state.selectedDate,
                 kanban_status: 'todo'
             });
             this.showToast('Request berhasil dikirim', 'success');

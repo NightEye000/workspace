@@ -324,9 +324,15 @@
                             <textarea id="request-notes" rows="3"></textarea>
                         </div>
                         
-                        <div class="form-group">
-                            <label>Deadline Jam</label>
-                            <input type="time" id="request-deadline" value="17:00">
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label>Tanggal Deadline</label>
+                                <input type="date" id="request-date" required>
+                            </div>
+                            <div class="form-group">
+                                <label>Jam Deadline</label>
+                                <input type="time" id="request-deadline" value="17:00" required>
+                            </div>
                         </div>
                         
                         <button type="submit" class="btn btn-rose btn-block">
