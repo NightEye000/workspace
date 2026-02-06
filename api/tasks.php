@@ -453,10 +453,12 @@ function updateTask() {
     $isRoutine = !empty($input['is_routine']) ? 1 : 0;
     $routineDays = !empty($input['routine_days']) ? json_encode($input['routine_days']) : null;
     
+    $attachmentRequired = !empty($input['attachment_required']) ? 1 : 0;
+    
     // Update Task
-    $sql = "UPDATE tasks SET title = ?, category = ?, start_time = ?, end_time = ?, is_routine = ?, routine_days = ? WHERE id = ?";
+    $sql = "UPDATE tasks SET title = ?, category = ?, start_time = ?, end_time = ?, is_routine = ?, routine_days = ?, attachment_required = ? WHERE id = ?";
     $stmt = $db->prepare($sql);
-    $stmt->execute([$title, $category, $startTime, $endTime, $isRoutine, $routineDays, $id]);
+    $stmt->execute([$title, $category, $startTime, $endTime, $isRoutine, $routineDays, $attachmentRequired, $id]);
     
     // Update Checklist (Delete all and re-insert is simplest for this scale)
     $db->prepare("DELETE FROM checklist_items WHERE task_id = ?")->execute([$id]);
@@ -497,8 +499,7 @@ function updateTaskStatus() {
     }
     
     // Check ownership
-    // Check ownership
-    $stmt = $db->prepare("SELECT staff_id, attachment_required FROM tasks WHERE id = ?");
+    $stmt = $db->prepare("SELECT staff_id, title, attachment_required FROM tasks WHERE id = ?");
     $stmt->execute([$id]);
     $task = $stmt->fetch();
     

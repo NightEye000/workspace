@@ -134,6 +134,10 @@
                             <i data-lucide="list" style="width: 14px; height: 14px; margin-right: 4px; display: inline-block; vertical-align: text-top;"></i>
                             Daftar Tugas
                         </button>
+                        <button class="toggle-btn" data-view="history" onclick="App.setViewMode('history')">
+                            <i data-lucide="history" style="width: 14px; height: 14px; margin-right: 4px; display: inline-block; vertical-align: text-top;"></i>
+                            Log Pekerjaan
+                        </button>
                     </div>
                     <p>Jadwal: <span id="selected-date-label"></span></p>
                     <div class="date-picker-wrapper">
@@ -221,6 +225,17 @@
                 <!-- List Content -->
                 <div id="list-view-content" class="list-view-content">
                     <!-- Tasks will be rendered here -->
+                </div>
+            </div>
+
+            <!-- History View Container (Hidden by default) -->
+            <div id="history-view-container" class="history-view-container hidden">
+                <div class="history-view-header">
+                    <h3><i data-lucide="history"></i> Riwayat Pekerjaan</h3>
+                    <p class="text-muted">Tugas yang sudah selesai atau melewati deadline</p>
+                </div>
+                <div id="history-view-content" class="history-view-content">
+                    <!-- History will be rendered here -->
                 </div>
             </div>
         </main>

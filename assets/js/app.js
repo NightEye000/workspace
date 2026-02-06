@@ -695,14 +695,6 @@ const App = {
     // TIMELINE RENDERING
     // =========================================
 
-    setViewMode(mode) {
-        this.state.viewMode = mode;
-        document.querySelectorAll('.toggle-btn').forEach(btn => {
-            btn.classList.toggle('active', btn.dataset.view === mode);
-        });
-        this.loadTimeline();
-    },
-
     async loadAllStaff() {
         try {
             const res = await API.getUsers();
@@ -738,27 +730,40 @@ const App = {
 
         const timelineContainer = document.getElementById('timeline-container');
         const listContainer = document.getElementById('list-view-container');
+        const historyContainer = document.getElementById('history-view-container');
         const dateWrapper = document.querySelector('.date-picker-wrapper');
         const dateLabel = document.querySelector('#selected-date-label').parentElement;
 
+        // Hide all first
+        if (timelineContainer) timelineContainer.classList.add('hidden');
+        if (listContainer) listContainer.classList.add('hidden');
+        if (historyContainer) historyContainer.classList.add('hidden');
+
         if (mode === 'list') {
             // LIST VIEW MODE
-            if (timelineContainer) timelineContainer.classList.add('hidden');
             if (listContainer) listContainer.classList.remove('hidden');
 
             // Hide date picker in list mode as it uses its own filter
-            if (dateWrapper) dateWrapper.style.visibility = 'hidden';
-            if (dateLabel) dateLabel.style.visibility = 'hidden';
+            if (dateWrapper) dateWrapper.style.display = 'none';
+            if (dateLabel) dateLabel.style.display = 'none';
 
             this.loadListView();
+        } else if (mode === 'history') {
+            // HISTORY VIEW MODE
+            if (historyContainer) historyContainer.classList.remove('hidden');
+
+            // Hide date picker in history mode
+            if (dateWrapper) dateWrapper.style.display = 'none';
+            if (dateLabel) dateLabel.style.display = 'none';
+
+            this.loadHistoryView();
         } else {
             // TIMELINE MODE (All / Me)
-            if (listContainer) listContainer.classList.add('hidden');
             if (timelineContainer) timelineContainer.classList.remove('hidden');
 
             // Show date picker
-            if (dateWrapper) dateWrapper.style.visibility = 'visible';
-            if (dateLabel) dateLabel.style.visibility = 'visible';
+            if (dateWrapper) dateWrapper.style.display = 'block';
+            if (dateLabel) dateLabel.style.display = 'block';
 
             this.loadTimeline();
         }
@@ -954,17 +959,43 @@ const App = {
     },
 
     applyCustomDateRange() {
-        if (!this.calendarState.startDate || !this.calendarState.endDate) return;
+        const currentFilter = this.state.timeFilter;
 
-        this.state.timeFilter = 'custom';
+        if (currentFilter === 'custom') {
+            if (!this.calendarState.startDate || !this.calendarState.endDate) return;
 
-        // Update Label
-        const fmtId = (d) => d.toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' });
-        document.getElementById('date-filter-label').textContent =
-            `${fmtId(this.calendarState.startDate)} - ${fmtId(this.calendarState.endDate)}`;
+            // Save custom range to state
+            this.state.customRange = {
+                start: this.formatDate(this.calendarState.startDate),
+                end: this.formatDate(this.calendarState.endDate)
+            };
 
-        // Reset presets
-        document.querySelectorAll('.preset-btn').forEach(btn => btn.classList.remove('active'));
+            // Update Label
+            const fmtId = (d) => d.toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' });
+            document.getElementById('date-filter-label').textContent =
+                `${fmtId(this.calendarState.startDate)} - ${fmtId(this.calendarState.endDate)}`;
+        } else {
+            // It's a preset
+            const labelMap = {
+                'today': 'Hari Ini',
+                'yesterday': 'Kemarin',
+                'last_7_days': '7 Hari Terakhir',
+                'last_30_days': '30 Hari Terakhir',
+                'month_current': 'Bulan Ini',
+                'month_last': 'Bulan Lalu',
+                'all_time': 'Semua Waktu'
+            };
+            const labelEl = document.getElementById('date-filter-label');
+            if (labelEl) labelEl.textContent = labelMap[currentFilter] || 'Rentang Waktu';
+
+            // Clear custom range if switching to preset
+            this.state.customRange = null;
+        }
+
+        // Reset presets UI if custom (handled in applyDatePreset for presets)
+        if (currentFilter === 'custom') {
+            document.querySelectorAll('.preset-btn').forEach(btn => btn.classList.remove('active'));
+        }
 
         this.loadListView();
         this.toggleDateFilter(); // Close
@@ -985,32 +1016,42 @@ const App = {
             btn.classList.toggle('active', btn.dataset.preset === preset);
         });
 
-        // Update Label
-        const labelMap = {
-            'today': 'Hari Ini',
-            'yesterday': 'Kemarin',
-            'last_7_days': '7 Hari Terakhir',
-            'last_30_days': '30 Hari Terakhir',
-            'month_current': 'Bulan Ini',
-            'month_last': 'Bulan Lalu',
-            'all_time': 'Semua Waktu'
-        };
-        const labelEl = document.getElementById('date-filter-label');
-        if (labelEl) labelEl.textContent = labelMap[preset] || 'Rentang Waktu';
-
-        // Clear custom state
+        // Clear custom state visual only (actual state remains until Apply is clicked logic handled in applyCustomDateRange)
         this.calendarState.startDate = null;
         this.calendarState.endDate = null;
         this.updateCustomRangeDisplay();
         this.highlightCalendarRange();
 
-        this.loadListView();
+        // Don't auto-load or close. Wait for "Terapkan".
     },
 
+
+
     clearDateFilter() {
-        this.applyDatePreset('today'); // Reset to default
+        // Reset state
+        this.state.timeFilter = 'today';
+        this.state.customRange = null;
+
+        // Reset visual preset buttons
+        document.querySelectorAll('.preset-btn').forEach(btn => {
+            btn.classList.toggle('active', btn.dataset.preset === 'today');
+        });
+
+        // Reset Dropdown Label
+        const labelEl = document.getElementById('date-filter-label');
+        if (labelEl) labelEl.textContent = 'Hari Ini';
+
+        // Reset Calendar Selection
+        this.calendarState.startDate = null;
+        this.calendarState.endDate = null;
+        this.updateCustomRangeDisplay();
+        this.highlightCalendarRange();
+
+        // Close dropdown & Reload
         const dropdown = document.getElementById('date-filter-dropdown');
         if (dropdown) dropdown.classList.add('hidden');
+
+        this.loadListView();
     },
 
     getDateRangeFromFilter() {
@@ -1183,6 +1224,131 @@ const App = {
                         
                         <div class="list-task-actions">
                              <i data-lucide="chevron-right" style="color:var(--slate-400)"></i>
+                        </div>
+                    </div>
+                `;
+            });
+
+            html += `
+                    </div>
+                </div>
+            `;
+        });
+
+        container.innerHTML = html;
+        this.initIcons();
+    },
+
+    // =========================================
+    // HISTORY VIEW (Completed + Past Due Tasks)
+    // =========================================
+    async loadHistoryView() {
+        const container = document.getElementById('history-view-content');
+        if (!container) return;
+
+        container.innerHTML = '<div class="flex-center p-4"><div class="spinner"></div></div>';
+
+        try {
+            const params = {
+                limit: 50
+            };
+
+            // Use current user for 'me' filter
+            if (this.state.listFilter === 'me') {
+                params.staff_id = this.state.user.id;
+            }
+
+            const res = await API.getWorkHistory(params);
+
+            if (res.success) {
+                this.renderHistoryView(res.history || []);
+            } else {
+                throw new Error(res.message || 'Unknown error');
+            }
+        } catch (error) {
+            console.error('Failed to load history:', error);
+            container.innerHTML = '<div class="text-danger p-4">Gagal memuat riwayat pekerjaan: ' + (error.message || 'Unknown error') + '</div>';
+        }
+    },
+
+    renderHistoryView(history) {
+        const container = document.getElementById('history-view-content');
+        if (!container) return;
+
+        if (!history || history.length === 0) {
+            container.innerHTML = `
+                <div class="empty-state">
+                    <i data-lucide="inbox"></i>
+                    <h3>Tidak ada riwayat</h3>
+                    <p>Belum ada tugas yang selesai atau melewati deadline</p>
+                </div>
+            `;
+            this.initIcons();
+            return;
+        }
+
+        const formatDate = (dateStr) => {
+            const date = new Date(dateStr);
+            return date.toLocaleDateString('id-ID', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
+        };
+
+        // Group by date
+        const grouped = {};
+        history.forEach(task => {
+            const date = task.task_date;
+            if (!grouped[date]) grouped[date] = [];
+            grouped[date].push(task);
+        });
+
+        let html = '';
+
+        Object.keys(grouped).sort((a, b) => new Date(b) - new Date(a)).forEach(date => {
+            const tasks = grouped[date];
+
+            html += `
+                <div class="history-date-group">
+                    <div class="history-date-header">
+                        <i data-lucide="calendar"></i>
+                        ${formatDate(date)}
+                    </div>
+                    <div class="history-tasks">
+            `;
+
+            tasks.forEach(task => {
+                const safeTitle = this.escapeHtml(task.title);
+                const safeStaffName = this.escapeHtml(task.staff_name);
+                const checklistProgress = task.total_checklist > 0
+                    ? `${task.done_checklist}/${task.total_checklist}`
+                    : '-';
+
+                const statusClass = task.is_completed ? 'completed' : 'past-due';
+                const statusLabel = task.is_completed ? 'Selesai' : 'Tidak Selesai';
+                const statusIcon = task.is_completed ? 'check-circle' : 'x-circle';
+
+                html += `
+                    <div class="history-task-card ${statusClass}" onclick="App.openTaskDetail(${task.id})">
+                        <div class="history-task-status">
+                            <i data-lucide="${statusIcon}"></i>
+                        </div>
+                        <div class="history-task-info">
+                            <div class="history-task-title">${safeTitle}</div>
+                            <div class="history-task-meta">
+                                <span class="history-task-time">
+                                    <i data-lucide="clock"></i>
+                                    ${task.start_time.substring(0, 5)} - ${task.end_time.substring(0, 5)}
+                                </span>
+                                <span class="history-task-staff">
+                                    <i data-lucide="user"></i>
+                                    ${safeStaffName}
+                                </span>
+                                <span class="history-task-checklist">
+                                    <i data-lucide="check-square"></i>
+                                    ${checklistProgress}
+                                </span>
+                            </div>
+                        </div>
+                        <div class="history-task-badge ${statusClass}">
+                            ${statusLabel}
                         </div>
                     </div>
                 `;
@@ -1650,15 +1816,18 @@ const App = {
                 <div class="checklist-items">
         `;
 
-        // Check if task is for today
+        // Check if task can be interacted with (task_date >= today, i.e. today or future)
         const todayStr = new Date().toLocaleDateString('sv').split('T')[0];
         const taskDate = task.task_date || task.date;
-        const isToday = taskDate === todayStr;
+        const today = new Date(todayStr);
+        const taskDateObj = new Date(taskDate);
+        // Allow interaction if task date is today or in the future, block past tasks
+        const canInteractByDate = taskDateObj >= today;
 
         checklist.forEach(item => {
-            const canInteract = task.can_edit && isToday;
+            const canInteract = task.can_edit && canInteractByDate;
             const disabledClass = canInteract ? '' : 'disabled';
-            const clickAction = canInteract ? `onclick="App.toggleChecklist(${item.id}, ${task.id})"` : (isToday ? '' : `onclick="App.showToast('Tidak bisa checklist tugas hari lalu', 'error')"`);
+            const clickAction = canInteract ? `onclick="App.toggleChecklist(${item.id}, ${task.id})"` : `onclick="App.showToast('Tidak bisa checklist tugas yang sudah lewat', 'error')"`;
 
             let timeLog = '';
             if (item.is_done && item.completed_at) {
@@ -1675,7 +1844,7 @@ const App = {
             html += `
                 <div class="checklist-item ${item.is_done ? 'checked' : ''} ${disabledClass}" 
                      ${clickAction} 
-                     style="${!isToday ? 'opacity:0.6; cursor:not-allowed;' : ''}">
+                     style="${!canInteract ? 'opacity:0.6; cursor:not-allowed;' : ''}">
                     <div class="checkbox">
                         ${item.is_done ? '<i data-lucide="check"></i>' : ''}
                     </div>

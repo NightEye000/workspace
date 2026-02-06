@@ -219,6 +219,12 @@ const API = {
     // Routine Templates
     async getRoutineTemplates(department = '') {
         return this.request(`routines.php?action=list&department=${department}`);
+    },
+
+    // Work History
+    async getWorkHistory(params = {}) {
+        const query = new URLSearchParams(params).toString();
+        return this.request(`history.php?action=list&${query}`);
     }
 };
 

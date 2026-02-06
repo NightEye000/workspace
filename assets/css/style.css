@@ -3934,3 +3934,366 @@ body {
     color: var(--slate-400);
     font-size: 0.85rem;
 }
+
+/* =====================================================
+   History View (Full Page)
+===================================================== */
+
+.history-view-container {
+    padding: var(--space-4);
+}
+
+.history-view-header {
+    margin-bottom: var(--space-4);
+}
+
+.history-view-header h3 {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    font-size: 1.25rem;
+    font-weight: 700;
+    color: var(--slate-800);
+    margin: 0 0 var(--space-1) 0;
+}
+
+.history-view-header h3 svg {
+    width: 22px;
+    height: 22px;
+    color: var(--primary);
+}
+
+.history-view-header p {
+    margin: 0;
+    font-size: 0.85rem;
+}
+
+.history-view-content {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-4);
+}
+
+/* History Date Groups */
+.history-date-group {
+    background: white;
+    border-radius: var(--radius-xl);
+    border: 1px solid var(--slate-200);
+    overflow: hidden;
+    box-shadow: var(--shadow-sm);
+}
+
+.history-date-header {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    padding: var(--space-3) var(--space-4);
+    background: linear-gradient(135deg, var(--slate-50) 0%, var(--slate-100) 100%);
+    font-weight: 600;
+    font-size: 0.85rem;
+    color: var(--slate-700);
+    border-bottom: 1px solid var(--slate-200);
+}
+
+.history-date-header svg {
+    width: 16px;
+    height: 16px;
+    color: var(--primary);
+}
+
+.history-tasks {
+    display: flex;
+    flex-direction: column;
+}
+
+/* History Task Cards */
+.history-task-card {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    padding: var(--space-3) var(--space-4);
+    cursor: pointer;
+    transition: var(--transition-fast);
+    border-bottom: 1px solid var(--slate-100);
+}
+
+.history-task-card:last-child {
+    border-bottom: none;
+}
+
+.history-task-card:hover {
+    background: var(--slate-50);
+}
+
+.history-task-card.completed .history-task-status {
+    background: var(--success-bg);
+    color: var(--success);
+}
+
+.history-task-card.past-due .history-task-status {
+    background: var(--danger-bg);
+    color: var(--danger);
+}
+
+.history-task-status {
+    width: 36px;
+    height: 36px;
+    border-radius: var(--radius-full);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+}
+
+.history-task-status svg {
+    width: 18px;
+    height: 18px;
+}
+
+.history-task-info {
+    flex: 1;
+    min-width: 0;
+}
+
+.history-task-title {
+    font-weight: 600;
+    color: var(--slate-800);
+    font-size: 0.9rem;
+    margin-bottom: 4px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.history-task-meta {
+    display: flex;
+    align-items: center;
+    gap: var(--space-4);
+    font-size: 0.75rem;
+    color: var(--slate-500);
+}
+
+.history-task-meta span {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.history-task-meta svg {
+    width: 12px;
+    height: 12px;
+}
+
+.history-task-badge {
+    padding: 4px 10px;
+    border-radius: var(--radius-full);
+    font-size: 0.7rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    flex-shrink: 0;
+}
+
+.history-task-badge.completed {
+    background: var(--success-bg);
+    color: var(--success);
+}
+
+.history-task-badge.past-due {
+    background: var(--danger-bg);
+    color: var(--danger);
+}
+
+/* =====================================================
+   Mobile Responsive Improvements (Comprehensive)
+===================================================== */
+
+@media (max-width: 768px) {
+
+    /* 1. Header Layout */
+    .page-header {
+        flex-direction: column;
+        align-items: stretch;
+        gap: var(--space-2);
+        /* Reduced gap */
+        margin-bottom: var(--space-2);
+        /* Reduced margin bottom */
+        padding-bottom: var(--space-2);
+        /* Reduced padding bottom */
+    }
+
+    .page-header-left {
+        width: 100%;
+        flex-direction: column;
+        align-items: flex-start;
+        gap: var(--space-3);
+    }
+
+    .page-header-left h2 {
+        font-size: 1.25rem;
+    }
+
+    /* 2. Scrollable View Toggles */
+    .view-toggle {
+        width: 100%;
+        overflow-x: auto;
+        white-space: nowrap;
+        padding-bottom: 4px;
+        /* Space for scrollbar if visible */
+        justify-content: flex-start;
+        -webkit-overflow-scrolling: touch;
+        /* Smooth scroll on iOS */
+    }
+
+    .view-toggle::-webkit-scrollbar {
+        height: 0;
+        width: 0;
+        display: none;
+    }
+
+    .toggle-btn {
+        flex-shrink: 0;
+        font-size: 0.8rem;
+        padding: 6px 12px;
+    }
+
+    /* 3. Date Picker & Filters */
+    .page-header-right {
+        width: 100%;
+        justify-content: flex-start;
+        flex-wrap: wrap;
+        gap: var(--space-2);
+    }
+
+    .date-picker-wrapper {
+        flex-grow: 1;
+    }
+
+    /* 4. Filter Bar Chips */
+    .list-view-filters {
+        flex-direction: column;
+        align-items: stretch;
+        gap: var(--space-3);
+        margin-bottom: var(--space-4);
+        padding-bottom: var(--space-2);
+        border-bottom: 1px solid var(--slate-100);
+    }
+
+    .filter-group {
+        display: flex;
+        overflow-x: auto;
+        padding-bottom: 4px;
+        gap: var(--space-2);
+        width: 100%;
+        -webkit-overflow-scrolling: touch;
+    }
+
+    .filter-group::-webkit-scrollbar {
+        height: 0;
+        width: 0;
+        display: none;
+    }
+
+    .filter-chip {
+        flex-shrink: 0;
+    }
+
+    /* 5. List View Cards */
+    .list-task-card {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: var(--space-3);
+        padding: var(--space-3);
+    }
+
+    .list-task-time {
+        flex-direction: row;
+        width: 100%;
+        border-right: none;
+        border-bottom: 1px solid var(--slate-100);
+        padding-bottom: var(--space-2);
+        padding-right: 0;
+        justify-content: flex-start;
+        gap: var(--space-3);
+        text-align: left;
+    }
+
+    .list-task-time .date,
+    .list-task-time .time {
+        font-size: 0.85rem;
+        margin: 0;
+    }
+
+    .list-task-time::after {
+        content: "";
+        /* Add separator if needed */
+        display: none;
+    }
+
+    .list-task-info {
+        width: 100%;
+    }
+
+    .list-task-actions {
+        width: 100%;
+        display: flex;
+        justify-content: flex-end;
+        margin-top: var(--space-1);
+        padding-top: var(--space-2);
+        border-top: 1px solid var(--slate-50);
+    }
+
+    /* 6. History View Cards */
+    .history-task-card {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: var(--space-3);
+    }
+
+    .history-task-status {
+        width: 32px;
+        height: 32px;
+    }
+
+    .history-task-info {
+        width: 100%;
+    }
+
+    .history-task-meta {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: var(--space-1);
+        margin-top: var(--space-2);
+    }
+
+    .history-task-badge {
+        align-self: flex-start;
+        margin-top: var(--space-1);
+        font-size: 0.65rem;
+    }
+
+    /* 7. Hide desktop-only elements */
+    .desktop-only {
+        display: none !important;
+    }
+
+    /* 8. Fix dropdown position on mobile */
+    .date-filter-dropdown {
+        position: fixed;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        width: 90vw;
+        max-width: 350px;
+        max-height: 80vh;
+        overflow-y: auto;
+        z-index: 1000;
+        box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.2), 0 10px 10px -5px rgba(0, 0, 0, 0.1);
+    }
+
+    /* Overlay for dropdown */
+    .dropdown-overlay {
+        display: block;
+        /* Managed by JS to show/hide */
+    }
+}
