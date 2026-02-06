@@ -1,6 +1,6 @@
 <?php
 /**
- * Routine Templates API (Admin Only)
+ * Routine Templates API
  */
 
 // Configure session before starting

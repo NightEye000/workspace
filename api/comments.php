@@ -139,6 +139,33 @@ function addAttachment() {
     $stmt->execute([$taskId, $name, $url, $type]);
     
     $attachmentId = $db->lastInsertId();
+
+    // Auto-update task status to 'done' if all checklist items are completed
+    // and this was the missing requirement
+    $stmtCheck = $db->prepare("SELECT COUNT(*) as total, SUM(is_done) as done FROM checklist_items WHERE task_id = ?");
+    $stmtCheck->execute([$taskId]);
+    $stats = $stmtCheck->fetch();
+    
+    // Get task info to check attachment_required
+    $stmtTask = $db->prepare("SELECT title, status, attachment_required FROM tasks WHERE id = ?");
+    $stmtTask->execute([$taskId]);
+    $taskInfo = $stmtTask->fetch();
+    
+    $newStatus = null;
+    
+    // Auto-update to 'done' if:
+    // 1. All checklist items are completed (or no checklist items)
+    // 2. If attachment_required, now we have at least one attachment
+    $checklistComplete = ($stats['total'] == 0) || ($stats['total'] == $stats['done']);
+    $attachmentSatisfied = true; // We just added one, so it's satisfied now
+    
+    if ($checklistComplete && $attachmentSatisfied && $taskInfo['status'] !== 'done') {
+        $db->prepare("UPDATE tasks SET status = 'done' WHERE id = ?")->execute([$taskId]);
+        $newStatus = 'done';
+        
+        // Notify mentioned users
+        notifyMentionedUsersInComments($taskId, $taskInfo['title'] ?? 'Tugas');
+    }
     
     jsonResponse([
         'success' => true, 
@@ -148,7 +175,8 @@ function addAttachment() {
             'name' => $name,
             'url' => $url,
             'type' => $type
-        ]
+        ],
+        'new_status' => $newStatus // Tell frontend if status changed
     ]);
 }
 
@@ -168,8 +196,13 @@ function deleteAttachment() {
     
     $db = getDB();
     
-    // Get attachment's task for permission check
-    $stmt = $db->prepare("SELECT a.*, t.staff_id FROM attachments a JOIN tasks t ON a.task_id = t.id WHERE a.id = ?");
+    // Get attachment's task for permission check and status update
+    $stmt = $db->prepare("
+        SELECT a.*, t.staff_id, t.id as task_id, t.status, t.attachment_required 
+        FROM attachments a 
+        JOIN tasks t ON a.task_id = t.id 
+        WHERE a.id = ?
+    ");
     $stmt->execute([$attachmentId]);
     $attachment = $stmt->fetch();
     
@@ -182,8 +215,74 @@ function deleteAttachment() {
         jsonResponse(['success' => false, 'message' => 'Access denied'], 403);
     }
     
+    $taskId = $attachment['task_id'];
+    $wasAttachmentRequired = $attachment['attachment_required'] == 1;
+    $wasTaskDone = $attachment['status'] === 'done';
+    
+    // Delete the attachment
     $stmt = $db->prepare("DELETE FROM attachments WHERE id = ?");
     $stmt->execute([$attachmentId]);
     
-    jsonResponse(['success' => true, 'message' => 'Attachment deleted']);
+    $newStatus = null;
+    
+    // Check if we need to revert task status
+    if ($wasAttachmentRequired && $wasTaskDone) {
+        // Count remaining attachments
+        $stmtCount = $db->prepare("SELECT COUNT(*) as count FROM attachments WHERE task_id = ?");
+        $stmtCount->execute([$taskId]);
+        $remainingCount = $stmtCount->fetch()['count'];
+        
+        // If no attachments left and attachment was required, revert status to in-progress
+        if ($remainingCount == 0) {
+            $db->prepare("UPDATE tasks SET status = 'in-progress' WHERE id = ?")->execute([$taskId]);
+            $newStatus = 'in-progress';
+        }
+    }
+    
+    jsonResponse([
+        'success' => true, 
+        'message' => $newStatus ? 'Lampiran dihapus. Status tugas diubah karena lampiran wajib.' : 'Lampiran dihapus',
+        'new_status' => $newStatus
+    ]);
+}
+
+/**
+ * Notify mentioned users when a task is completed (via attachment)
+ */
+function notifyMentionedUsersInComments($taskId, $taskTitle) {
+    $db = getDB();
+    $currentUser = getCurrentUser();
+    
+    // Get all mentioned users who haven't been notified yet
+    $stmt = $db->prepare("
+        SELECT tm.id, tm.user_id
+        FROM task_mentions tm
+        WHERE tm.task_id = ? AND tm.notified_on_complete = 0
+    ");
+    $stmt->execute([$taskId]);
+    $mentions = $stmt->fetchAll();
+    
+    if (empty($mentions)) {
+        return;
+    }
+    
+    // Send notification to each mentioned user
+    $stmtNotif = $db->prepare("
+        INSERT INTO notifications (user_id, title, message, type, task_id)
+        VALUES (?, ?, ?, 'completed', ?)
+    ");
+    
+    $stmtUpdate = $db->prepare("UPDATE task_mentions SET notified_on_complete = 1 WHERE id = ?");
+    
+    foreach ($mentions as $mention) {
+        $stmtNotif->execute([
+            $mention['user_id'],
+            '✅ Tugas Selesai!',
+            "{$currentUser['name']} telah menyelesaikan tugas \"{$taskTitle}\". Anda dapat melanjutkan pekerjaan Anda.",
+            $taskId
+        ]);
+        
+        // Mark as notified
+        $stmtUpdate->execute([$mention['id']]);
+    }
 }

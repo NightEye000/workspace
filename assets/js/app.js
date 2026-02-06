@@ -4,11 +4,7 @@
  */
 
 const App = {
-    updateNotificationBadge() {
-        if (window.Notifications && window.Notifications.loadUnread) {
-            window.Notifications.loadUnread();
-        }
-    },
+    // Note: updateNotificationBadge is defined at line ~1305 with full implementation
 
     checkNotificationBlocking() {
         const blocker = document.getElementById('notification-blocker');
@@ -44,11 +40,248 @@ const App = {
         user: null,
         viewMode: 'all', // 'all' or 'me'
         selectedDate: null,
-        deptFilter: 'All'
+        deptFilter: 'All',
+        workMentions: [],     // Selected mentions for Add Work form
+        requestMentions: [],  // Selected mentions for Request form
+
+        // List View State
+        listFilter: 'me',     // 'me' or 'all'
+        timeFilter: 'all_time'   // Changed default to 'all_time' per user request
     },
 
     els: {},
     checkInterval: null,
+    allStaffList: [], // Cache of all staff for mention dropdown
+
+    // =========================================
+    // SECURITY HELPERS
+    // =========================================
+
+    /**
+     * Escape HTML to prevent XSS
+     * First decodes any existing HTML entities to prevent double-escaping
+     */
+    escapeHtml(text) {
+        if (!text) return '';
+        // First decode any existing HTML entities to prevent double-escaping
+        const textarea = document.createElement('textarea');
+        textarea.innerHTML = text;
+        const decoded = textarea.value;
+        // Then properly escape
+        const div = document.createElement('div');
+        div.textContent = decoded;
+        return div.innerHTML;
+    },
+
+    /**
+     * Validate and sanitize URL - only allow safe protocols
+     * Blocks: javascript:, vbscript:, etc.
+     */
+    sanitizeUrl(url) {
+        if (!url) return '';
+        const trimmed = url.trim();
+
+        // Block dangerous protocols
+        if (/^(javascript|vbscript|data:text)/i.test(trimmed)) {
+            console.warn('Blocked potentially dangerous URL:', trimmed);
+            return '';
+        }
+
+        // Allow safe protocols: http, https, data:image, ftp, file, mailto
+        if (/^(https?:\/\/|data:image\/|ftp:\/\/|file:\/\/|mailto:)/i.test(trimmed)) {
+            return trimmed;
+        }
+
+        // For relative URLs starting with / or ./ or just words (treated as relative)
+        if (/^(\/|\.\/|\.\.\/|[a-zA-Z0-9_-]+)/i.test(trimmed) && !trimmed.includes(':')) {
+            return trimmed;
+        }
+
+        // Return empty for suspicious URLs
+        return '';
+    },
+
+    // =========================================
+    // LOADING HELPERS
+    // =========================================
+
+    /**
+     * Show skeleton loading in task detail modal
+     */
+    showDetailSkeleton() {
+        const container = document.getElementById('task-detail-content');
+        if (container) {
+            container.innerHTML = `
+                <div class="task-detail-loading">
+                    <div class="skeleton-badge">
+                        <div class="skeleton"></div>
+                        <div class="skeleton"></div>
+                    </div>
+                    <div class="skeleton skeleton-title"></div>
+                    <div class="skeleton skeleton-meta"></div>
+                    <div class="skeleton-checklist">
+                        <div class="skeleton-item">
+                            <div class="skeleton skeleton-checkbox"></div>
+                            <div class="skeleton skeleton-item-text"></div>
+                        </div>
+                        <div class="skeleton-item">
+                            <div class="skeleton skeleton-checkbox"></div>
+                            <div class="skeleton skeleton-item-text"></div>
+                        </div>
+                        <div class="skeleton-item">
+                            <div class="skeleton skeleton-checkbox"></div>
+                            <div class="skeleton skeleton-item-text"></div>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+    },
+
+    /**
+     * Add loading state to a button
+     */
+    setButtonLoading(btn, isLoading) {
+        if (!btn) return;
+        if (isLoading) {
+            btn.classList.add('loading');
+            btn.dataset.originalText = btn.innerHTML;
+            btn.innerHTML = '<span style="opacity:0">' + btn.innerHTML + '</span>';
+        } else {
+            btn.classList.remove('loading');
+            if (btn.dataset.originalText) {
+                btn.innerHTML = btn.dataset.originalText;
+            }
+        }
+    },
+
+    /**
+     * Show loading overlay on a section
+     */
+    setSectionLoading(selector, isLoading) {
+        const el = typeof selector === 'string' ? document.querySelector(selector) : selector;
+        if (el) {
+            el.classList.toggle('section-loading', isLoading);
+        }
+    },
+
+    // =========================================
+    // MENTIONS HELPERS
+    // =========================================
+
+    /**
+     * Populate mentions dropdown with staff list
+     */
+    populateMentionsDropdown(selectId, excludeUserId = null) {
+        const select = document.getElementById(selectId);
+        if (!select) return;
+
+        // Clear existing options except the first
+        select.innerHTML = '<option value="">+ Pilih staff untuk di-tag...</option>';
+
+        // Get staff from cached list or from timeline
+        const staffList = this.allStaffList.length > 0
+            ? this.allStaffList
+            : (this.state.staffList || []);
+
+        staffList.forEach(staff => {
+            if (staff.id != excludeUserId && staff.id != this.state.user?.id) {
+                const option = document.createElement('option');
+                option.value = staff.id;
+                option.textContent = `${staff.name} (${staff.role || 'Staff'})`;
+                select.appendChild(option);
+            }
+        });
+    },
+
+    /**
+     * Handle mention selection
+     */
+    handleMentionSelect(selectId, containerId, stateKey) {
+        const select = document.getElementById(selectId);
+        const container = document.getElementById(containerId);
+        if (!select || !container) return;
+
+        select.onchange = () => {
+            const userId = parseInt(select.value);
+            if (!userId) return;
+
+            // Check if already added
+            if (this.state[stateKey].includes(userId)) {
+                select.value = '';
+                return;
+            }
+
+            // Get staff info
+            const option = select.options[select.selectedIndex];
+            const staffName = option.textContent;
+
+            // Add to state
+            this.state[stateKey].push(userId);
+
+            // Create chip
+            const chip = document.createElement('div');
+            chip.className = 'mention-chip';
+            chip.dataset.userId = userId;
+            chip.style.cssText = `
+                display: inline-flex;
+                align-items: center;
+                gap: 6px;
+                padding: 4px 10px;
+                background: linear-gradient(135deg, var(--primary-light) 0%, var(--primary) 100%);
+                color: white;
+                border-radius: 20px;
+                font-size: 0.75rem;
+                font-weight: 500;
+            `;
+            chip.innerHTML = `
+                <span>@${staffName.split(' (')[0]}</span>
+                <button type="button" onclick="App.removeMention(${userId}, '${containerId}', '${stateKey}')" style="
+                    background: rgba(255,255,255,0.3);
+                    border: none;
+                    border-radius: 50%;
+                    width: 16px;
+                    height: 16px;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    cursor: pointer;
+                    padding: 0;
+                    font-size: 10px;
+                    color: white;
+                ">&times;</button>
+            `;
+
+            container.appendChild(chip);
+            select.value = '';
+        };
+    },
+
+    /**
+     * Remove a mention chip
+     */
+    removeMention(userId, containerId, stateKey) {
+        // Remove from state
+        this.state[stateKey] = this.state[stateKey].filter(id => id !== userId);
+
+        // Remove chip from DOM
+        const container = document.getElementById(containerId);
+        if (container) {
+            const chip = container.querySelector(`[data-user-id="${userId}"]`);
+            if (chip) chip.remove();
+        }
+    },
+
+    /**
+     * Reset mentions for a form
+     */
+    resetMentions(containerId, stateKey) {
+        this.state[stateKey] = [];
+        const container = document.getElementById(containerId);
+        if (container) {
+            container.innerHTML = '';
+        }
+    },
 
     // =========================================
     // INITIALIZATION
@@ -122,7 +355,11 @@ const App = {
         if (this.els.deptFilter) {
             this.els.deptFilter.addEventListener('change', (e) => {
                 this.state.deptFilter = e.target.value;
-                this.loadTimeline();
+                if (this.state.viewMode === 'list') {
+                    this.loadListView();
+                } else {
+                    this.loadTimeline();
+                }
             });
         }
 
@@ -137,6 +374,15 @@ const App = {
             this.els.btnRequest.addEventListener('click', () => {
                 this.openModal('modal-request');
                 this.initRequestForm();
+            });
+        }
+
+        // Attachment Form
+        const attForm = document.getElementById('form-attachment');
+        if (attForm) {
+            attForm.addEventListener('submit', async (e) => {
+                e.preventDefault();
+                await this.submitAttachment();
             });
         }
 
@@ -258,25 +504,29 @@ const App = {
         this.updateNotificationBadge();
 
         // Initial Data Load
+        this.loadAllStaff();
         this.loadDepartments();
         this.loadTimeline();
 
         // Admin Buttons Visibility
         if (this.state.user.role === 'Admin') {
             this.els.btnUserMgmt.classList.remove('hidden');
-            this.els.btnGenerateRoutines.classList.remove('hidden');
             this.els.btnAddWork.classList.add('hidden'); // Hide Add Work for Admin
         } else {
             this.els.btnUserMgmt.classList.add('hidden');
-            this.els.btnGenerateRoutines.classList.add('hidden');
             this.els.btnAddWork.classList.remove('hidden');
         }
+
+        // Routines can be generated by everyone now
+        this.els.btnGenerateRoutines.classList.remove('hidden');
 
         // Auto Refresh Timeline
         if (this.checkInterval) clearInterval(this.checkInterval);
         this.checkInterval = setInterval(() => {
             this.updateCurrentTimeLine();
         }, 60000); // Update red line every minute
+
+        this.initDateFilterDismiss();
     },
 
     initDatePicker() {
@@ -320,7 +570,13 @@ const App = {
 
     closeModal(modalId) {
         document.getElementById(modalId).classList.add('hidden');
-        document.getElementById('modal-overlay').classList.add('hidden');
+
+        // Check if any other modal is visible before hiding overlay
+        const visibleModals = document.querySelectorAll('.modal:not(.hidden)');
+        if (visibleModals.length === 0) {
+            document.getElementById('modal-overlay').classList.add('hidden');
+        }
+
         this.editingTaskId = null; // Reset edit mode just in case
     },
 
@@ -410,6 +666,17 @@ const App = {
 
     async handleLogout() {
         try {
+            // Cleanup intervals to prevent memory leaks
+            if (this.checkInterval) {
+                clearInterval(this.checkInterval);
+                this.checkInterval = null;
+            }
+
+            // Stop notification manager intervals
+            if (window.NotificationManager && window.NotificationManager.stop) {
+                window.NotificationManager.stop();
+            }
+
             await API.logout();
             window.location.reload();
         } catch (error) {
@@ -436,6 +703,17 @@ const App = {
         this.loadTimeline();
     },
 
+    async loadAllStaff() {
+        try {
+            const res = await API.getUsers();
+            if (res.users) {
+                this.allStaffList = res.users;
+            }
+        } catch (e) {
+            console.error('Failed to load staff list', e);
+        }
+    },
+
     async loadDepartments() {
         try {
             const result = await API.getDepartments();
@@ -448,6 +726,476 @@ const App = {
         } catch (error) {
             console.error('Failed to load departments');
         }
+    },
+
+    setViewMode(mode) {
+        this.state.viewMode = mode;
+
+        // Update Buttons UI
+        document.querySelectorAll('.toggle-btn').forEach(btn => {
+            btn.classList.toggle('active', btn.dataset.view === mode);
+        });
+
+        const timelineContainer = document.getElementById('timeline-container');
+        const listContainer = document.getElementById('list-view-container');
+        const dateWrapper = document.querySelector('.date-picker-wrapper');
+        const dateLabel = document.querySelector('#selected-date-label').parentElement;
+
+        if (mode === 'list') {
+            // LIST VIEW MODE
+            if (timelineContainer) timelineContainer.classList.add('hidden');
+            if (listContainer) listContainer.classList.remove('hidden');
+
+            // Hide date picker in list mode as it uses its own filter
+            if (dateWrapper) dateWrapper.style.visibility = 'hidden';
+            if (dateLabel) dateLabel.style.visibility = 'hidden';
+
+            this.loadListView();
+        } else {
+            // TIMELINE MODE (All / Me)
+            if (listContainer) listContainer.classList.add('hidden');
+            if (timelineContainer) timelineContainer.classList.remove('hidden');
+
+            // Show date picker
+            if (dateWrapper) dateWrapper.style.visibility = 'visible';
+            if (dateLabel) dateLabel.style.visibility = 'visible';
+
+            this.loadTimeline();
+        }
+    },
+
+    // =========================================
+    // LIST VIEW CONTROLLER
+    // =========================================
+
+    setListFilter(filterType, btnElement) {
+        this.state.listFilter = filterType;
+
+        // Update UI
+        document.querySelectorAll('.filter-chip').forEach(btn => btn.classList.remove('active'));
+        if (btnElement) btnElement.classList.add('active');
+
+        this.loadListView();
+    },
+
+    // =========================================
+    // DATE FILTER DROPDOWN LOGIC
+    // =========================================
+
+    toggleDateFilter() {
+        const dropdown = document.getElementById('date-filter-dropdown');
+        dropdown.classList.toggle('hidden');
+
+        if (!dropdown.classList.contains('hidden')) {
+            this.initDualCalendar();
+        }
+    },
+
+    // Close dropdown when clicking outside
+    initDateFilterDismiss() {
+        document.addEventListener('click', (e) => {
+            const wrapper = document.querySelector('.date-filter-wrapper');
+            const dropdown = document.getElementById('date-filter-dropdown');
+            if (wrapper && !wrapper.contains(e.target) && dropdown && !dropdown.classList.contains('hidden')) {
+                dropdown.classList.add('hidden');
+            }
+        });
+    },
+
+    // --- CALENDAR WIDGET LOGIC ---
+    calendarState: {
+        viewDate: new Date(), // The month shown in the first calendar
+        startDate: null,
+        endDate: null
+    },
+
+    initDualCalendar() {
+        if (!this.calendarState.startDate) {
+            this.calendarState.startDate = new Date();
+            this.calendarState.endDate = new Date();
+        }
+        this.renderDualCalendar();
+    },
+
+    renderDualCalendar() {
+        // Ensure viewDate is valid
+        if (!this.calendarState.viewDate) this.calendarState.viewDate = new Date();
+
+        const leftDate = new Date(this.calendarState.viewDate);
+        leftDate.setDate(1); // Force 1st of month
+
+        const rightDate = new Date(leftDate);
+        rightDate.setMonth(rightDate.getMonth() + 1);
+
+        this.renderMonth(leftDate, 'calendar-left');
+        this.renderMonth(rightDate, 'calendar-right');
+        this.highlightCalendarRange();
+        this.updateCustomRangeDisplay();
+    },
+
+    renderMonth(date, containerId) {
+        const container = document.getElementById(containerId);
+        if (!container) return;
+
+        const monthName = date.toLocaleDateString('id-ID', { month: 'long', year: 'numeric' });
+
+        // Header
+        let html = `<div class="calendar-header">${monthName}</div>`;
+
+        // Grid Header
+        html += `<div class="calendar-grid">`;
+        ['M', 'S', 'S', 'R', 'K', 'J', 'S'].forEach(d => {
+            html += `<div class="calendar-day-header">${d}</div>`;
+        });
+
+        const year = date.getFullYear();
+        const month = date.getMonth();
+
+        // Get day of 1st of month (0-6). 0=Sun.
+        // We want Mon=0, Sun=6? 
+        // Labels: M(Mon), S(Tue)...
+        // Date.getDay(): 0=Sun, 1=Mon .. 6=Sat.
+        // If we want Mon first: (day + 6) % 7.
+        // Sun(0) -> 6. Mon(1) -> 0.
+
+        const firstDayObj = new Date(year, month, 1);
+        const startingBlank = (firstDayObj.getDay() + 6) % 7;
+
+        const daysInMonth = new Date(year, month + 1, 0).getDate();
+
+        for (let i = 0; i < startingBlank; i++) {
+            html += `<div class="calendar-day empty"></div>`;
+        }
+
+        for (let d = 1; d <= daysInMonth; d++) {
+            const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+            html += `<div class="calendar-day" data-date="${dateStr}" onclick="App.handleCalendarDateClick('${dateStr}')">${d}</div>`;
+        }
+
+        html += `</div>`; // Close grid
+        container.innerHTML = html;
+    },
+
+    handleCalendarDateClick(dateStr) {
+        const clickedDate = new Date(dateStr);
+        // Reset time component for accurate comparison
+        clickedDate.setHours(0, 0, 0, 0);
+
+        if (!this.calendarState.startDate || (this.calendarState.startDate && this.calendarState.endDate)) {
+            // Start new selection
+            this.calendarState.startDate = clickedDate;
+            this.calendarState.endDate = null;
+        } else {
+            // Complete selection
+            const start = this.calendarState.startDate;
+            // Ensure start also has 0 time
+            start.setHours(0, 0, 0, 0);
+
+            if (clickedDate < start) {
+                this.calendarState.endDate = start;
+                this.calendarState.startDate = clickedDate;
+            } else {
+                this.calendarState.endDate = clickedDate;
+            }
+        }
+
+        this.highlightCalendarRange();
+        this.updateCustomRangeDisplay();
+    },
+
+    highlightCalendarRange() {
+        document.querySelectorAll('.calendar-day').forEach(el => {
+            el.className = 'calendar-day'; // Reset
+            if (el.innerHTML === '') el.classList.add('empty');
+
+            const cellDateStr = el.dataset.date;
+            if (!cellDateStr) return;
+
+            const cellDate = new Date(cellDateStr);
+            cellDate.setHours(0, 0, 0, 0);
+
+            const start = this.calendarState.startDate;
+            if (start) start.setHours(0, 0, 0, 0);
+
+            const end = this.calendarState.endDate;
+            if (end) end.setHours(0, 0, 0, 0);
+
+            if (start && cellDate.getTime() === start.getTime()) {
+                el.classList.add('selected', 'range-start');
+            }
+            if (end && cellDate.getTime() === end.getTime()) {
+                el.classList.add('selected', 'range-end');
+            }
+            if (start && end && cellDate > start && cellDate < end) {
+                el.classList.add('in-range');
+            }
+        });
+    },
+
+    updateCustomRangeDisplay() {
+        const fmt = (d) => {
+            if (!d) return '-';
+            return d.toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' });
+        };
+        const startEl = document.getElementById('display-start-date');
+        const endEl = document.getElementById('display-end-date');
+        if (startEl) startEl.textContent = fmt(this.calendarState.startDate);
+        if (endEl) endEl.textContent = fmt(this.calendarState.endDate);
+    },
+
+    calendarPrevMonth() {
+        this.calendarState.viewDate.setMonth(this.calendarState.viewDate.getMonth() - 1);
+        this.renderDualCalendar();
+    },
+
+    calendarNextMonth() {
+        this.calendarState.viewDate.setMonth(this.calendarState.viewDate.getMonth() + 1);
+        this.renderDualCalendar();
+    },
+
+    applyCustomDateRange() {
+        if (!this.calendarState.startDate || !this.calendarState.endDate) return;
+
+        this.state.timeFilter = 'custom';
+
+        // Update Label
+        const fmtId = (d) => d.toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' });
+        document.getElementById('date-filter-label').textContent =
+            `${fmtId(this.calendarState.startDate)} - ${fmtId(this.calendarState.endDate)}`;
+
+        // Reset presets
+        document.querySelectorAll('.preset-btn').forEach(btn => btn.classList.remove('active'));
+
+        this.loadListView();
+        this.toggleDateFilter(); // Close
+    },
+
+    formatDate(date) {
+        const y = date.getFullYear();
+        const m = String(date.getMonth() + 1).padStart(2, '0');
+        const d = String(date.getDate()).padStart(2, '0');
+        return `${y}-${m}-${d}`;
+    },
+
+    applyDatePreset(preset) {
+        this.state.timeFilter = preset;
+
+        // Update UI Active State
+        document.querySelectorAll('.preset-btn').forEach(btn => {
+            btn.classList.toggle('active', btn.dataset.preset === preset);
+        });
+
+        // Update Label
+        const labelMap = {
+            'today': 'Hari Ini',
+            'yesterday': 'Kemarin',
+            'last_7_days': '7 Hari Terakhir',
+            'last_30_days': '30 Hari Terakhir',
+            'month_current': 'Bulan Ini',
+            'month_last': 'Bulan Lalu',
+            'all_time': 'Semua Waktu'
+        };
+        const labelEl = document.getElementById('date-filter-label');
+        if (labelEl) labelEl.textContent = labelMap[preset] || 'Rentang Waktu';
+
+        // Clear custom state
+        this.calendarState.startDate = null;
+        this.calendarState.endDate = null;
+        this.updateCustomRangeDisplay();
+        this.highlightCalendarRange();
+
+        this.loadListView();
+    },
+
+    clearDateFilter() {
+        this.applyDatePreset('today'); // Reset to default
+        const dropdown = document.getElementById('date-filter-dropdown');
+        if (dropdown) dropdown.classList.add('hidden');
+    },
+
+    getDateRangeFromFilter() {
+        const today = new Date();
+        const start = new Date(today);
+        const end = new Date(today);
+
+        const formatDate = (date) => {
+            const y = date.getFullYear();
+            const m = String(date.getMonth() + 1).padStart(2, '0');
+            const d = String(date.getDate()).padStart(2, '0');
+            return `${y}-${m}-${d}`;
+        };
+
+        if (this.state.timeFilter === 'custom') {
+            if (this.state.customRange) {
+                return this.state.customRange;
+            }
+            // Fallback if no range set yet
+            return {
+                start: formatDate(today),
+                end: formatDate(today)
+            };
+        }
+
+        switch (this.state.timeFilter) {
+            case 'today':
+                // start and end are already today
+                break;
+            case 'yesterday':
+                start.setDate(today.getDate() - 1);
+                end.setDate(today.getDate() - 1);
+                break;
+            case 'last_7_days':
+                start.setDate(today.getDate() - 6);
+                // end is today
+                break;
+            case 'last_30_days':
+                start.setDate(today.getDate() - 29);
+                // end is today
+                break;
+            case 'month_current':
+                start.setDate(1);
+                end.setMonth(today.getMonth() + 1);
+                end.setDate(0); // Last day of month
+                break;
+            case 'month_last':
+                start.setMonth(today.getMonth() - 1);
+                start.setDate(1);
+                end.setDate(0); // Last day of previous month
+                break;
+            case 'all_time':
+                return { start: '2000-01-01', end: '2100-12-31' };
+        }
+
+        return { start: formatDate(start), end: formatDate(end) };
+    },
+
+    async loadListView() {
+        const container = document.getElementById('list-view-content');
+        if (!container) return;
+
+        container.innerHTML = '<div class="flex-center p-4"><div class="spinner"></div></div>';
+
+        try {
+            const { start, end } = this.getDateRangeFromFilter();
+            const staffId = this.state.listFilter === 'me' ? this.state.user.id : null;
+
+            // Build params dynamically
+            const params = {
+                start_date: start,
+                end_date: end,
+                department: this.state.deptFilter
+            };
+
+            if (staffId) {
+                params.staff_id = staffId;
+            }
+
+            console.log('loadListView Params:', params);
+            // Re-use getTasks but with range
+            const res = await API.getTasks(params);
+
+            if (res.success) {
+                this.renderListView(res.tasks || []);
+            }
+        } catch (error) {
+            console.error(error);
+            container.innerHTML = '<div class="text-danger p-4">Gagal memuat daftar tugas</div>';
+        }
+    },
+
+    renderListView(tasks) {
+        const container = document.getElementById('list-view-content');
+        if (!container) return;
+
+        if (tasks.length === 0) {
+            container.innerHTML = `
+                <div class="empty-state">
+                    <div class="empty-icon"><i data-lucide="check-circle"></i></div>
+                    <h3>Tidak ada tugas</h3>
+                    <p>Tidak ada tugas ditemukan untuk filter ini.</p>
+                </div>
+            `;
+            this.initIcons();
+            return;
+        }
+
+        // Group by Date groups
+        // Logic: Past, Today, Tomorrow, Later.. 
+        // But since we pre-filter by time range, just group by Date Header
+        const grouped = {};
+
+        tasks.forEach(task => {
+            const date = task.task_date; // YYYY-MM-DD
+            if (!grouped[date]) grouped[date] = [];
+            grouped[date].push(task);
+        });
+
+        let html = '';
+        const sortedDates = Object.keys(grouped).sort();
+
+        const today = new Date().toISOString().split('T')[0];
+
+        sortedDates.forEach(dateStr => {
+            const dateTasks = grouped[dateStr];
+
+            // Format Date Header
+            const dateObj = new Date(dateStr);
+            const options = { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' };
+            let label = dateObj.toLocaleDateString('id-ID', options);
+
+            if (dateStr === today) label = `Hari Ini — ${label}`;
+
+            html += `
+                <div class="list-group">
+                    <h3>${label} <span class="count">${dateTasks.length}</span></h3>
+                    <div class="list-items">
+            `;
+
+            dateTasks.forEach(task => {
+                const isLate = task.task_date < today && task.status !== 'done';
+                const statusClass = task.status; // todo, in-progress, done
+                const formattedTime = task.start_time.substring(0, 5) + ' - ' + task.end_time.substring(0, 5);
+
+                // Show staff avatar if "All" filter
+                // Show staff name if "All" filter (Concise Mode: No Avatar)
+                let staffHtml = '';
+                if (this.state.listFilter === 'all') {
+                    staffHtml = `<span style="font-size:0.75rem; color:var(--primary); font-weight:600; background:var(--primary-light); padding:2px 6px; border-radius:4px; margin-right:6px;">${task.staff_name}</span>`;
+                }
+
+                html += `
+                    <div class="list-task-card ${isLate ? 'border-danger' : ''}" onclick="App.openTaskDetail(${task.id})">
+                        <div class="list-task-time">
+                            <span class="date" style="font-size:0.7rem; color:var(--slate-500); margin-bottom:2px;">Deadline</span>
+                            <span class="time" style="color:var(--danger);">${task.end_time.substring(0, 5)}</span>
+                        </div>
+                        
+                        <div class="list-task-info">
+                            <div class="list-task-header">
+                                ${staffHtml}
+                                <div class="list-task-title">${task.title}</div>
+                            </div>
+                            <div class="list-task-meta">
+                                <span><i data-lucide="tag"></i> ${task.category}</span>
+                                <span class="list-task-status ${statusClass}">${statusClass.replace('-', ' ')}</span> 
+                            </div>
+                        </div>
+                        
+                        <div class="list-task-actions">
+                             <i data-lucide="chevron-right" style="color:var(--slate-400)"></i>
+                        </div>
+                    </div>
+                `;
+            });
+
+            html += `
+                    </div>
+                </div>
+            `;
+        });
+
+        container.innerHTML = html;
+        this.initIcons();
     },
 
     async loadTimeline() {
@@ -464,8 +1212,10 @@ const App = {
 
             const result = await API.getTasks(params);
 
-            // API now returns 'timeline' which is a list of users with their tasks
-            // If it returns 'tasks' (legacy), we must handle it (but we just changed API)
+            // If we are in legacy single-view mode, handle it
+            if (!result.timeline && result.tasks) {
+                // Not expected here as loadTimeline is for Timeline View
+            }
 
             let staffList = [];
             if (result.timeline) {
@@ -500,110 +1250,280 @@ const App = {
     },
 
     renderTimeline(staffList) {
+        this.renderCalendarView(staffList);
+    },
+
+    renderCalendarView(staffList) {
         const container = this.els.timelineContainer;
 
-        // Premium Header
-        let html = `
-            <div class="timeline-header">
-                <div class="header-title">Staff & Performa</div>
-                <div class="header-legend">
-                    <span>Timeline (${this.state.selectedDate})</span>
-                    <div class="legend-items">
-                         <span class="legend-item"><div class="dot" style="background:var(--purple);"></div> Jobdesk</span>
-                         <span class="legend-item"><div class="dot" style="background:var(--amber);"></div> Tambahan</span>
-                         <span class="legend-item"><div class="dot" style="background:var(--teal);"></div> Inisiatif</span>
-                         <span class="legend-item"><div class="dot" style="background:var(--rose);"></div> Request</span>
-                    </div>
-                </div>
-            </div>
-            <div class="timeline-body custom-scrollbar">
-        `;
-
-        if (staffList.length === 0) {
-            html += `
+        // Handle Empty State
+        if (!staffList || staffList.length === 0) {
+            container.innerHTML = `
                 <div class="empty-state-timeline">
                     <i data-lucide="calendar-x"></i>
                     <p>Tidak ada staff yang ditemukan.</p>
                 </div>
             `;
-        } else {
-            staffList.forEach(user => {
-                const isMe = user.id == this.state.user.id;
-                const userTasks = user.tasks || [];
-                userTasks.sort((a, b) => (a.start_time || '').localeCompare(b.start_time || ''));
-
-                const total = userTasks.length;
-                const completed = userTasks.filter(t => t.status === 'done').length;
-                const percent = total > 0 ? Math.round((completed / total) * 100) : 0;
-                const percentColor = percent === 100 ? 'var(--success)' : 'var(--primary)';
-
-                html += `
-                    <div class="staff-row ${isMe ? 'is-me' : ''}">
-                         <!-- PROFILE -->
-                         <div class="staff-profile">
-                            <div class="staff-profile-header">
-                                <div class="staff-avatar-wrapper">
-                                    <img src="${user.avatar}" class="staff-avatar">
-                                    ${isMe ? '<div class="me-badge">★</div>' : ''}
-                                </div>
-                                <div class="staff-info">
-                                    <div class="staff-name">${user.name}</div>
-                                    <div class="staff-role">${user.role}</div>
-                                </div>
-                            </div>
-                             <div class="staff-performance">
-                               <div class="perf-header">
-                                  <span class="perf-label">PERFORMA</span>
-                                  <span class="perf-value" style="color:${percent === 100 ? 'var(--success)' : 'var(--slate-700)'};">${percent}%</span>
-                               </div>
-                               <div class="perf-bar-bg">
-                                  <div class="perf-bar-fill" style="background:${percentColor}; width:${percent}%"></div>
-                               </div>
-                               <div class="perf-stats">
-                                 <span>${completed} Selesai</span>
-                                 <span>${total} Total</span>
-                               </div>
-                            </div>
-                         </div>
-
-                         <!-- TASKS -->
-                         <div class="tasks-column custom-scrollbar">
-                `;
-
-                if (userTasks.length > 0) {
-                    userTasks.forEach((task, index) => {
-                        html += this.renderTaskCard(task);
-                        if (index < userTasks.length - 1) {
-                            html += '<div style="height:2px; width:16px; background:var(--slate-200); flex-shrink:0;"></div>';
-                        }
-                    });
-                } else {
-                    html += `
-                        <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; color:var(--slate-400); opacity:0.5; width:100%; min-width:200px;">
-                           <i data-lucide="layout" style="width:24px;height:24px;margin-bottom:0.5rem;"></i>
-                           <span style="font-size:12px; font-style:italic;">Tidak ada jadwal</span>
-                        </div>
-                    `;
-                }
-
-                if (this.state.user.role === 'Admin' || isMe) {
-                    html += `
-                        <button onclick="App.openAddWorkForStaff(${user.id})" title="Tambah Jobdesk" 
-                            style="flex-shrink:0; width:40px; height:40px; border-radius:50%; border:2px dashed var(--slate-300); background:white; color:var(--slate-400); display:flex; align-items:center; justify-content:center; transition:all 0.2s; margin-left:8px; cursor:pointer;"
-                            onmouseover="this.style.borderColor='var(--primary)';this.style.color='var(--primary)'" 
-                            onmouseout="this.style.borderColor='var(--slate-300)';this.style.color='var(--slate-400)'">
-                            <i data-lucide="plus"></i>
-                        </button>
-                    `;
-                }
-
-                html += `</div></div>`;
-            });
+            this.initIcons();
+            return;
         }
 
-        html += '</div>';
+        // Configuration
+        const startHour = 1;
+        const endHour = 24; // Shows up to 24:00 block
+
+        // 1. Generate Header (Staff Columns)
+        let html = `
+            <div class="calendar-wrapper">
+                <div class="calendar-header">
+                    <div class="calendar-corner"></div>
+                    <div class="calendar-header-staff-row">
+        `;
+
+        staffList.forEach(user => {
+            // Calculate Performance Stats
+            const userTasks = user.tasks || [];
+            const total = userTasks.length;
+            const completed = userTasks.filter(t => t.status === 'done').length;
+            const percent = total > 0 ? Math.round((completed / total) * 100) : 0;
+            const percentColor = percent === 100 ? 'var(--success)' : 'var(--danger)';
+
+            // Sanitize user data to prevent XSS
+            const safeAvatar = this.sanitizeUrl(user.avatar) || `https://ui-avatars.com/api/?name=${encodeURIComponent(user.name || 'User')}&background=random`;
+            const safeName = this.escapeHtml(user.name);
+            const safeRole = this.escapeHtml(user.role);
+
+            html += `
+                <div class="calendar-staff-header">
+                     <div class="avatar-wrapper">
+                        <img src="${safeAvatar}" class="avatar" onerror="this.src='https://ui-avatars.com/api/?name=User'">
+                        ${user.id == this.state.user.id ? '<div class="me-badge" style="position:absolute; bottom:0; right:0; font-size:10px;">★</div>' : ''}
+                     </div>
+                     <div class="name">${safeName}</div>
+                     <div class="role">${safeRole}</div>
+                     
+                     <!-- Performance Bar -->
+                     <div class="calendar-perf-container">
+                        <div class="calendar-perf-stats">
+                             <span style="color:${percentColor}; font-weight:bold;">${percent}%</span>
+                             <span>${completed}/${total}</span>
+                        </div>
+                        <div class="calendar-perf-bar-bg">
+                            <div class="calendar-perf-bar-fill" style="width:${percent}%; background:${percentColor}"></div>
+                        </div>
+                     </div>
+                </div>
+            `;
+        });
+        html += `</div></div>`; // End Header
+
+        // 2. Generate Body (Time + Grid)
+        // Explicitly calculate height to ensure no cutoff
+        const totalHeight = (endHour - startHour + 1) * 80;
+
+        html += `<div class="calendar-body-scroll"><div class="calendar-time-labels" style="min-height:${totalHeight}px">`;
+
+        // Time Labels
+        for (let h = startHour; h <= endHour; h++) {
+            const timeStr = h.toString().padStart(2, '0') + ':00';
+            html += `<div class="time-slot-label"><span>${timeStr}</span></div>`;
+        }
+        html += `</div>`; // End Time Labels
+
+        // Grid Area with explicit height
+        html += `<div class="calendar-grid-area" style="min-height:${totalHeight}px">`;
+
+        staffList.forEach(user => {
+            html += `<div class="calendar-staff-column">`;
+
+            // Render Tasks
+            const tasks = user.tasks || [];
+            const positionedTasks = this.calculateTaskPositions(tasks, startHour);
+
+            positionedTasks.forEach(pt => {
+                const task = pt.task;
+                const zIndexStyle = pt.zIndex ? `z-index:${pt.zIndex};` : '';
+                const style = `top:${pt.top}px; height:${pt.height}px; left:${pt.left}%; width:${pt.width}%; ${zIndexStyle}`;
+                const catClass = 'cat-' + (task.category || 'Jobdesk').replace(/\s+/g, '-');
+                const statusClass = task.status === 'done' ? 'status-done' : '';
+
+                // Checklist Logic
+                const checklist = task.checklist || [];
+                const checkTotal = checklist.length;
+                const checkDone = checklist.filter(c => c.is_done == 1).length;
+                const showChecklist = checkTotal > 0;
+
+                // Status Logic
+                const statusLabels = { 'todo': 'To Do', 'in-progress': 'In Progress', 'done': 'Selesai' };
+                const label = statusLabels[task.status] || task.status;
+                let icon = 'circle';
+                if (task.status === 'in-progress') icon = 'loader';
+                if (task.status === 'done') icon = 'check-circle-2';
+
+                // Sanitize task title to prevent XSS
+                const safeTitle = this.escapeHtml(task.title);
+
+                html += `
+                    <div class="calendar-task-card ${catClass} ${statusClass}" style="${style}" 
+                         onclick="App.openTaskDetail(${task.id})" title="${safeTitle} - ${label}">
+                        <div class="task-title">${safeTitle}</div>
+                        
+                        <div class="task-meta">
+                            <span><i data-lucide="clock" style="width:10px;height:10px;display:inline;"></i> ${this.formatTime(task.start_time)} - ${this.formatTime(task.end_time)}</span>
+                            ${showChecklist ? `
+                                <span style="margin-left:4px;">
+                                    <i data-lucide="check-square" style="width:10px;height:10px;display:inline;"></i> ${checkDone}/${checkTotal}
+                                </span>
+                            ` : ''}
+                        </div>
+                        
+                        <div class="task-footer" style="margin-top:2px; font-size:0.65rem; display:flex; align-items:center; gap:4px; opacity:0.9;">
+                             <i data-lucide="${icon}" style="width:10px;height:10px;"></i> ${label}
+                        </div>
+                    </div>
+                `;
+            });
+
+            // Add "Add Button" for Admin or Self (Overlay on hover? Or just at top? 
+            // In calendar view, creating tasks usually involves clicking empty slot. 
+            // For now, let's keep it simple or user relies on the big + Button.)
+
+            html += `</div>`; // End Staff Column
+        });
+
+        html += `</div></div></div>`; // End Grid Area, Body Scroll, Wrapper
+
         container.innerHTML = html;
         this.initIcons();
+
+        // Horizontal scroll sync
+        const headerRow = container.querySelector('.calendar-header-staff-row');
+        const bodyScroll = container.querySelector('.calendar-body-scroll');
+
+        if (headerRow && bodyScroll) {
+            bodyScroll.addEventListener('scroll', () => {
+                headerRow.scrollLeft = bodyScroll.scrollLeft;
+            });
+
+            // Auto-scroll to 08:00
+            // Calculate offset: ( Target(8) - Start(1) ) * 80px
+            const targetHour = 8;
+            if (startHour < targetHour) {
+                const scrollPX = (targetHour - startHour) * 80;
+                // Validate if scrollPX is positive
+                if (scrollPX > 0) {
+                    // Small timeout to ensure DOM layout is ready
+                    setTimeout(() => {
+                        bodyScroll.scrollTop = scrollPX;
+                    }, 0);
+                }
+            }
+        }
+    },
+
+    calculateTaskPositions(tasks, startHour) {
+        if (!tasks || !tasks.length) return [];
+
+        const PX_PER_HOUR = 80; // Must match CSS background-size
+        const MIN_HEIGHT = 26;  // Minimum height for visibility
+
+        const mapped = tasks.map(t => {
+            const start = this.parseTime(t.start_time);
+            const end = this.parseTime(t.end_time);
+
+            // Calculate minutes from startHour (e.g. 8:00)
+            const globalStartMin = startHour * 60;
+            let startMin = start.totalMin - globalStartMin;
+            let endMin = end.totalMin - globalStartMin;
+
+            // If task starts before view, clamp visual start (or let it be negative? negative hides it)
+            // Let's optimize: if completely before, ignore?
+
+            const top = (startMin / 60) * PX_PER_HOUR;
+            const durationMin = endMin - startMin;
+            const height = Math.max(MIN_HEIGHT, (durationMin / 60) * PX_PER_HOUR);
+
+            return {
+                task: t,
+                visualStart: startMin,
+                visualEnd: endMin,
+                top: top,
+                height: height,
+                id: t.id
+            };
+        });
+
+        // Sort by start time
+        mapped.sort((a, b) => a.visualStart - b.visualStart);
+
+        // Cluster Overlaps
+        const clusters = [];
+        if (mapped.length > 0) {
+            let currentCluster = [mapped[0]];
+            let clusterEnd = mapped[0].visualEnd;
+
+            for (let i = 1; i < mapped.length; i++) {
+                const item = mapped[i];
+                if (item.visualStart < clusterEnd) {
+                    // Overlaps with the current cluster range
+                    currentCluster.push(item);
+                    if (item.visualEnd > clusterEnd) clusterEnd = item.visualEnd;
+                } else {
+                    // New cluster
+                    clusters.push(currentCluster);
+                    currentCluster = [item];
+                    clusterEnd = item.visualEnd;
+                }
+            }
+            clusters.push(currentCluster);
+        }
+
+        // Assign columns within each cluster
+        clusters.forEach(cluster => {
+            // 1. Pack items into columns (finding the first column where it fits)
+            const columns = [];
+            cluster.forEach(item => {
+                let placed = false;
+                for (let i = 0; i < columns.length; i++) {
+                    const column = columns[i];
+                    const lastItem = column[column.length - 1];
+                    if (item.visualStart >= lastItem.visualEnd) {
+                        column.push(item);
+                        item.colIndex = i;
+                        placed = true;
+                        break;
+                    }
+                }
+                if (!placed) {
+                    columns.push([item]);
+                    item.colIndex = columns.length - 1;
+                }
+            });
+
+            // 2. Stack items (Cascading View)
+            // Tasks overlap: e.g. Col 0 is 100%, Col 1 is shifted right and covers Col 0
+            cluster.forEach(item => {
+                const indentPercent = 12; // Indent 12% per overlap level
+                const maxIndent = 60; // Max indentation to keep it visible
+
+                const indent = Math.min(item.colIndex * indentPercent, maxIndent);
+
+                item.left = indent;
+                item.width = (100 - indent);
+                item.zIndex = 20 + item.colIndex; // Ensure later columns sit on top
+            });
+        });
+
+        return mapped;
+    },
+
+    parseTime(timeStr) {
+        if (!timeStr) return { h: 0, m: 0, totalMin: 0 };
+        // timeStr format "HH:mm:ss" or "HH:mm"
+        const parts = timeStr.split(':');
+        const h = parseInt(parts[0], 10);
+        const m = parseInt(parts[1], 10);
+        return { h, m, totalMin: h * 60 + m };
     },
 
     renderTaskCard(task) {
@@ -671,16 +1591,21 @@ const App = {
     // =========================================
 
     async openTaskDetail(taskId) {
+        // Show skeleton immediately for better UX
+        this.showDetailSkeleton();
+        this.openModal('modal-task-detail');
+
         try {
             const result = await API.getTask(taskId);
             if (!result.success) throw new Error(result.message);
 
             const task = result.task;
             this.renderTaskDetail(task);
-            this.openModal('modal-task-detail');
+            // Modal already opened above, just init icons
             this.initIcons();
         } catch (error) {
             this.showToast('Error loading task: ' + error.message, 'error');
+            this.closeModal('modal-task-detail');
         }
     },
 
@@ -694,11 +1619,16 @@ const App = {
 
         const categoryClass = this.getCategoryClass(task.category);
 
+        // Sanitize user-provided data
+        const safeTitle = this.escapeHtml(task.title);
+        const safeCategory = this.escapeHtml(task.category);
+        const safeStaffName = this.escapeHtml(task.staff_name);
+
         let html = `
             <div class="task-detail-header">
                 <div class="task-detail-badges">
                     <div class="category-badge ${categoryClass}">
-                        ${task.category}
+                        ${safeCategory}
                     </div>
                     <select onchange="App.updateTaskStatus(${task.id}, this.value)" class="status-badge ${task.status}" style="border:none; cursor:pointer; outline:none; appearance:none; padding-right:1em;">
                         <option value="todo" ${task.status === 'todo' ? 'selected' : ''}>TODO</option>
@@ -706,9 +1636,9 @@ const App = {
                         <option value="done" ${task.status === 'done' ? 'selected' : ''}>DONE</option>
                     </select>
                 </div>
-                <h2 class="task-detail-title">${task.title}</h2>
+                <h2 class="task-detail-title">${safeTitle}</h2>
                 <div class="task-detail-meta">
-                    <span class="staff"><i data-lucide="user"></i> ${task.staff_name}</span>
+                    <span class="staff"><i data-lucide="user"></i> ${safeStaffName}</span>
                     <span><i data-lucide="clock"></i> ${this.formatTime(task.start_time)} - ${this.formatTime(task.end_time)}</span>
                 </div>
             </div>
@@ -720,25 +1650,87 @@ const App = {
                 <div class="checklist-items">
         `;
 
+        // Check if task is for today
+        const todayStr = new Date().toLocaleDateString('sv').split('T')[0];
+        const taskDate = task.task_date || task.date;
+        const isToday = taskDate === todayStr;
+
         checklist.forEach(item => {
+            const canInteract = task.can_edit && isToday;
+            const disabledClass = canInteract ? '' : 'disabled';
+            const clickAction = canInteract ? `onclick="App.toggleChecklist(${item.id}, ${task.id})"` : (isToday ? '' : `onclick="App.showToast('Tidak bisa checklist tugas hari lalu', 'error')"`);
+
+            let timeLog = '';
+            if (item.is_done && item.completed_at) {
+                const dateObj = new Date(item.completed_at);
+                // Format: 05 Feb 15:30
+                const dateStr = dateObj.toLocaleDateString('id-ID', { day: '2-digit', month: 'short' });
+                const timeStr = dateObj.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
+                timeLog = `<span class="checklist-time-log">${dateStr} ${timeStr}</span>`;
+            }
+
+            // Sanitize checklist item text
+            const safeItemText = this.escapeHtml(item.text);
+
             html += `
-                <div class="checklist-item ${item.is_done ? 'checked' : ''} ${task.can_edit ? '' : 'disabled'}" 
-                     ${task.can_edit ? `onclick="App.toggleChecklist(${item.id}, ${task.id})"` : ''}>
+                <div class="checklist-item ${item.is_done ? 'checked' : ''} ${disabledClass}" 
+                     ${clickAction} 
+                     style="${!isToday ? 'opacity:0.6; cursor:not-allowed;' : ''}">
                     <div class="checkbox">
                         ${item.is_done ? '<i data-lucide="check"></i>' : ''}
                     </div>
-                    <span class="text">${item.text}</span>
+                    <span class="text" style="flex:1;">${safeItemText}</span>
+                    ${timeLog}
                 </div>
             `;
         });
 
         html += '</div></div>';
 
+        // Attachments
+        if ((task.attachments && task.attachments.length > 0) || task.can_edit) {
+            html += '<div class="attachments-section"><h4>Lampiran</h4><div class="attachments-list">';
+
+            if (task.attachments) {
+                task.attachments.forEach(att => {
+                    const icon = att.type === 'link' ? 'link' : 'file';
+                    const target = att.type === 'link' ? '_blank' : '_self';
+                    const delBtn = task.can_edit ? `<button onclick="event.preventDefault(); App.deleteAttachment(${att.id}, ${task.id})" class="btn-icon-danger" title="Hapus Lampiran" style="padding:4px; margin-left:8px;"><i data-lucide="trash-2" style="width:14px; height:14px;"></i></button>` : '';
+
+                    // Sanitize attachment data
+                    const safeAttName = this.escapeHtml(att.name);
+                    const safeAttUrl = this.sanitizeUrl(att.url);
+
+                    html += `
+                        <div class="attachment-item-wrapper" style="display:flex; align-items:center; gap:8px; margin-bottom:4px;">
+                            <a href="${safeAttUrl}" target="${target}" class="attachment-item" rel="noopener noreferrer">
+                                <i data-lucide="${icon}"></i> <span>${safeAttName}</span>
+                            </a>
+                            ${delBtn}
+                        </div>
+                    `;
+                });
+            }
+
+            if (task.can_edit) {
+                html += `
+                    <button class="btn btn-sm btn-outline" style="margin-top:8px;" onclick="App.promptAddAttachment(${task.id})">
+                        <i data-lucide="plus"></i> Tambah Lampiran
+                    </button>
+                `;
+            }
+
+            html += '</div></div>';
+        }
+
         // Comments
         if (task.comments && task.comments.length > 0) {
             html += '<div class="comments-section"><h4>Komentar</h4><div class="comments-list">';
             task.comments.forEach(c => {
-                html += `<div class="comment-item"><strong>${c.user_name}</strong>: ${c.text}</div>`;
+                // Sanitize comment data
+                const safeUserName = this.escapeHtml(c.user_name);
+                const safeCommentText = this.escapeHtml(c.text);
+                html += `<div class="comment-item"><strong>${safeUserName}</strong>: ${safeCommentText}</div>`;
             });
             html += '</div></div>';
         }
@@ -782,27 +1774,120 @@ const App = {
         }
     },
 
+    async promptAddAttachment(taskId) {
+        document.getElementById('att-task-id').value = taskId;
+        document.getElementById('att-name').value = '';
+        document.getElementById('att-url').value = '';
+        this.openModal('modal-attachment');
+    },
+
+    async submitAttachment() {
+        const taskId = document.getElementById('att-task-id').value;
+        const name = document.getElementById('att-name').value;
+        const url = document.getElementById('att-url').value;
+        const submitBtn = document.querySelector('#modal-attachment .btn-primary');
+
+        if (!name || !url) {
+            this.showToast('Nama dan URL wajib diisi', 'warning');
+            return;
+        }
+
+        // Show loading state
+        this.setButtonLoading(submitBtn, true);
+
+        try {
+            const res = await API.addAttachment(taskId, name, url);
+            if (res.success) {
+                // Check if status changed to done
+                if (res.new_status === 'done') {
+                    this.showToast('Lampiran ditambahkan & Tugas selesai! ✓', 'success');
+                } else {
+                    this.showToast('Lampiran ditambahkan', 'success');
+                }
+
+                this.closeModal('modal-attachment');
+
+                // Refresh both detail and timeline
+                await this.openTaskDetail(taskId);
+                await this.loadTimeline(); // <-- This was missing!
+            }
+        } catch (e) {
+            this.showToast(e.message, 'error');
+        } finally {
+            this.setButtonLoading(submitBtn, false);
+        }
+    },
+
+    deleteAttachment(attId, taskId) {
+        this.showConfirm('Hapus lampiran ini?', async () => {
+            try {
+                const res = await API.deleteAttachment(attId);
+                if (res.success) {
+                    // Show appropriate toast based on status change
+                    if (res.new_status) {
+                        this.showToast('Lampiran dihapus. Status tugas berubah karena lampiran wajib belum terpenuhi.', 'warning');
+                    } else {
+                        this.showToast('Lampiran dihapus', 'success');
+                    }
+                    // Refresh detail and timeline
+                    await this.openTaskDetail(taskId);
+                    await this.loadTimeline();
+                }
+            } catch (e) {
+                this.showToast(e.message, 'error');
+            }
+        });
+    },
+
     async toggleChecklist(itemId, taskId) {
+        // Get the checklist item element for visual feedback
+        const itemEl = document.querySelector(`.checklist-item[onclick*="toggleChecklist(${itemId}"]`);
+        if (itemEl) {
+            itemEl.style.opacity = '0.5';
+            itemEl.style.pointerEvents = 'none';
+        }
+
         try {
             const res = await API.toggleChecklist(itemId);
-            if (res.new_status) {
-                // Optional: update local task status immediately if needed
+
+            // Show status change notification
+            if (res.new_status === 'done') {
+                this.showToast('Tugas selesai! ✓', 'success');
+            } else if (res.new_status === 'in-progress') {
+                this.showToast('Checklist diupdate', 'success');
             }
-            await this.openTaskDetail(taskId); // Refresh detail
-            await this.loadTimeline(); // Update bar metrics
+
+            // Refresh both detail and timeline
+            await Promise.all([
+                this.openTaskDetail(taskId),
+                this.loadTimeline()
+            ]);
         } catch (error) {
             this.showToast(error.message, 'error');
+            if (itemEl) {
+                itemEl.style.opacity = '1';
+                itemEl.style.pointerEvents = 'auto';
+            }
         }
     },
 
     async addComment(taskId) {
         const input = document.getElementById('comment-text');
+        const submitBtn = input.nextElementSibling;
+
         if (!input.value.trim()) return;
+
+        this.setButtonLoading(submitBtn, true);
+
         try {
             await API.addComment(taskId, input.value.trim());
-            this.openTaskDetail(taskId);
+            input.value = ''; // Clear input
+            this.showToast('Komentar ditambahkan', 'success');
+            await this.openTaskDetail(taskId);
         } catch (e) {
             this.showToast(e.message, 'error');
+        } finally {
+            this.setButtonLoading(submitBtn, false);
         }
     },
 
@@ -840,6 +1925,12 @@ const App = {
         }
     },
 
+    decodeHTML(html) {
+        const txt = document.createElement('textarea');
+        txt.innerHTML = html;
+        return txt.value;
+    },
+
     async openEditTask(taskId) {
         try {
             this.closeModal('modal-task-detail');
@@ -863,12 +1954,12 @@ const App = {
             const catSelect = document.getElementById('work-category');
             if (catSelect.onchange) catSelect.onchange({ target: catSelect });
 
-            document.getElementById('work-title').value = task.title;
+            document.getElementById('work-title').value = this.decodeHTML(task.title);
             document.getElementById('work-start').value = task.start_time.substring(0, 5);
             document.getElementById('work-end').value = task.end_time.substring(0, 5);
 
             // Checklist
-            const checklistText = (task.checklist || []).map(i => i.text).join('\n');
+            const checklistText = (task.checklist || []).map(i => this.decodeHTML(i.text)).join('\n');
             document.getElementById('work-checklist').value = checklistText;
 
             // Routine
@@ -886,6 +1977,10 @@ const App = {
                 });
             }
 
+            // Attachment Required
+            const attReq = document.getElementById('work-attachment-required');
+            if (attReq) attReq.checked = task.attachment_required == 1;
+
             this.openModal('modal-add-work');
             this.initIcons();
 
@@ -897,6 +1992,9 @@ const App = {
     initAddWorkForm() {
         document.getElementById('form-add-work').reset();
         document.getElementById('work-category').value = 'Jobdesk';
+        // Reset Attachment Required Checkbox
+        const attReq = document.getElementById('work-attachment-required');
+        if (attReq) attReq.checked = false;
 
         const routineOpts = document.getElementById('routine-options');
         if (routineOpts) routineOpts.classList.remove('hidden');
@@ -912,22 +2010,36 @@ const App = {
 
         if (catSelect) {
             catSelect.onchange = (e) => {
-                const isJobdesk = e.target.value === 'Jobdesk';
+                const val = e.target.value;
+                const isJobdesk = val === 'Jobdesk';
+                const isTambahan = val === 'Tugas Tambahan';
+
+                // Routine Options Visibility
                 if (routineOpts) routineOpts.classList.toggle('hidden', !isJobdesk);
                 if (!isJobdesk) {
                     if (rDays) rDays.classList.add('hidden');
                     if (tSel) tSel.classList.add('hidden');
                 }
 
+                // Deadline Visibility & Labels
+                const deadlineGroup = document.getElementById('work-deadline-group');
+                const endLabel = document.querySelector('label[for="work-end"]');
+
+                if (deadlineGroup) deadlineGroup.classList.toggle('hidden', !isTambahan);
+
+                if (endLabel) {
+                    endLabel.textContent = isTambahan ? 'Jam Deadline' : 'Selesai Jam';
+                }
+
                 // Color logic
                 if (!this.editingTaskId && btn) {
                     btn.className = 'btn btn-block';
-                    if (e.target.value === 'Tugas Tambahan') btn.classList.add('btn-warning');
-                    else if (e.target.value === 'Inisiatif') btn.style.background = '#14b8a6';
+                    if (val === 'Tugas Tambahan') btn.classList.add('btn-warning');
+                    else if (val === 'Inisiatif') btn.style.background = '#14b8a6';
                     else btn.classList.add('btn-primary');
 
                     const span = btn.querySelector('span');
-                    if (span) span.textContent = 'Simpan ' + e.target.value;
+                    if (span) span.textContent = 'Simpan ' + val;
                 }
             };
         }
@@ -940,6 +2052,12 @@ const App = {
         });
 
         if (this.loadRoutineTemplates) this.loadRoutineTemplates();
+
+        // Initialize mentions dropdown
+        this.resetMentions('work-mentions-selected', 'workMentions');
+        this.populateMentionsDropdown('work-mentions');
+        this.handleMentionSelect('work-mentions', 'work-mentions-selected', 'workMentions');
+        this.initIcons();
     },
 
     updateCurrentTimeLine() {
@@ -985,31 +2103,53 @@ const App = {
         const endTime = document.getElementById('work-end').value;
         const checklist = document.getElementById('work-checklist').value.split('\n').filter(l => l.trim());
         const isRoutine = document.getElementById('work-is-routine').checked && category === 'Jobdesk';
+        const attachmentRequired = document.getElementById('work-attachment-required').checked ? 1 : 0;
 
         const routineDays = [];
         document.querySelectorAll('.day-btn.active').forEach(b => routineDays.push(parseInt(b.dataset.day)));
 
         const data = {
             title, category, start_time: startTime, end_time: endTime, checklist,
-            is_routine: isRoutine, routine_days: routineDays
+            is_routine: isRoutine, routine_days: routineDays, attachment_required: attachmentRequired,
+            mentions: this.state.workMentions // Add mentions
         };
+
+        // Get submit button and show loading
+        const submitBtn = document.getElementById('btn-submit-work');
+        this.setButtonLoading(submitBtn, true);
 
         try {
             if (this.editingTaskId) {
                 data.id = this.editingTaskId;
                 await API.updateTask(data);
-                this.showToast('Tugas diupdate', 'success');
+                this.showToast('Tugas berhasil diupdate ✓', 'success');
                 this.editingTaskId = null;
             } else {
                 data.staff_id = this.targetStaffId || this.state.user.id;
-                data.task_date = this.state.selectedDate;
+
+                // Use deadline date if provided for Tugas Tambahan
+                const deadlineDateInput = document.getElementById('work-deadline-date');
+                if (data.category === 'Tugas Tambahan' && deadlineDateInput && deadlineDateInput.value) {
+                    data.task_date = deadlineDateInput.value;
+                } else {
+                    data.task_date = this.state.selectedDate;
+                }
+
                 await API.createTask(data);
-                this.showToast('Tugas dibuat', 'success');
+
+                // Show different toast if mentions were added
+                if (this.state.workMentions.length > 0) {
+                    this.showToast(`Tugas dibuat ✓ (${this.state.workMentions.length} staff akan dinotifikasi)`, 'success');
+                } else {
+                    this.showToast('Tugas berhasil dibuat ✓', 'success');
+                }
             }
             this.closeModal('modal-add-work');
-            this.loadTimeline();
+            await this.loadTimeline(); // Use await for smooth UX
         } catch (error) {
             this.showToast(error.message, 'error');
+        } finally {
+            this.setButtonLoading(submitBtn, false);
         }
     },
 
@@ -1018,10 +2158,10 @@ const App = {
         const title = this.currentTask && this.currentTask.id === taskId ? this.currentTask.title : 'Tugas ini';
         this.showConfirm(`Hapus "${title}"?`, async () => {
             try {
+                this.closeModal('modal-task-detail'); // Close first for better UX
                 await API.deleteTask(taskId);
-                this.closeModal('modal-task-detail');
-                this.loadTimeline();
-                this.showToast('Terhapus', 'success');
+                await this.loadTimeline();
+                this.showToast('Tugas berhasil dihapus', 'success');
             } catch (e) {
                 this.showToast(e.message, 'error');
             }
@@ -1138,9 +2278,34 @@ const App = {
     },
 
     showConfirm(message, onConfirm) {
-        if (confirm(message)) {
+        const modal = document.getElementById('modal-confirm');
+        const msgEl = document.getElementById('confirm-msg');
+        const btnYes = document.getElementById('btn-confirm-yes');
+        const btnCancel = document.getElementById('btn-confirm-cancel');
+
+        if (msgEl) msgEl.textContent = message;
+
+        // Remove old listeners to prevent stacking
+        const newYes = btnYes.cloneNode(true);
+        btnYes.parentNode.replaceChild(newYes, btnYes);
+
+        const newCancel = btnCancel.cloneNode(true);
+        btnCancel.parentNode.replaceChild(newCancel, btnCancel);
+
+        newYes.onclick = () => {
             onConfirm();
-        }
+            modal.classList.add('hidden');
+            document.getElementById('modal-overlay').classList.add('hidden');
+        };
+
+        newCancel.onclick = () => {
+            modal.classList.add('hidden');
+            document.getElementById('modal-overlay').classList.add('hidden');
+        };
+
+        modal.classList.remove('hidden');
+        document.getElementById('modal-overlay').classList.remove('hidden');
+        this.initIcons();
     },
 
     getCategoryClass(cat) {
@@ -1165,39 +2330,60 @@ const App = {
     // ... (Other admin methods omitted for brevity but key logic is restored)
 
     async loadRoutineTemplates() {
-        if (this.state.user.role === 'Admin') return; // Or implement properly
+        if (this.state.user.role === 'Admin') return;
+
         try {
             const res = await API.getRoutineTemplates(this.state.user.role);
-            if (res.templates) {
-                const select = document.getElementById('routine-template');
-                select.innerHTML = '<option>Pilih Template...</option>';
+            const select = document.getElementById('routine-template');
+
+            // Clear previous options
+            select.innerHTML = '<option value="">Pilih Template...</option>';
+
+            if (res.templates && res.templates.length > 0) {
+                this.routineTemplates = res.templates;
+
                 res.templates.forEach((t, i) => {
                     const opt = document.createElement('option');
-                    opt.value = i;
+                    opt.value = i; // Index in the array
                     opt.textContent = t.title;
                     select.appendChild(opt);
                 });
-                // bind logic...
-                this.routineTemplates = res.templates;
 
-                const tCheck = document.getElementById('use-template');
+                // Show the "Ambil dari Template" checkbox container
                 const tSelect = document.getElementById('template-select');
-                tSelect.classList.remove('hidden');
+                if (tSelect) tSelect.classList.remove('hidden');
 
-                tCheck.onchange = (e) => {
-                    document.getElementById('routine-template').classList.toggle('hidden', !e.target.checked);
-                };
+                // Bind checkbox toggle logic
+                const tCheck = document.getElementById('use-template');
+                if (tCheck) {
+                    tCheck.onchange = (e) => {
+                        select.classList.toggle('hidden', !e.target.checked);
+                        // Reset select if unchecked
+                        if (!e.target.checked) select.value = "";
+                    };
+                }
 
-                document.getElementById('routine-template').onchange = (e) => {
+                // Bind select change logic to fill form
+                select.onchange = (e) => {
                     const idx = e.target.value;
+                    if (idx === "") return; // "Pilih Template..." selected
+
                     const t = this.routineTemplates[idx];
                     if (t) {
                         document.getElementById('work-title').value = t.title;
-                        document.getElementById('work-checklist').value = (t.checklist_template || []).join('\n');
+                        const checklistVal = Array.isArray(t.checklist_template) ? t.checklist_template.join('\n') : '';
+                        document.getElementById('work-checklist').value = checklistVal;
                     }
                 };
+            } else {
+                // No templates found for this role
+                // Hide the template section entirely
+                const tSelect = document.getElementById('template-select');
+                if (tSelect) tSelect.classList.add('hidden');
             }
-        } catch (e) { }
+        } catch (e) {
+            console.error('Failed to load templates', e);
+        }
     },
 
     async generateRoutines() {
@@ -1210,8 +2396,10 @@ const App = {
 
     async loadUsersTable() {
         try {
-            const res = await API.getUsers();
             const list = document.getElementById('users-table-container');
+            list.innerHTML = '<div class="p-4 text-center text-slate-500">Loading users...</div>';
+
+            const res = await API.getUsers();
 
             if (!res.users || res.users.length === 0) {
                 list.innerHTML = '<div class="p-4 text-center text-slate-500">Belum ada user.</div>';
@@ -1232,23 +2420,27 @@ const App = {
             `;
 
             res.users.forEach(u => {
-                const avatar = u.avatar || `https://ui-avatars.com/api/?name=${u.name}&background=random`;
+                // Sanitize user data to prevent XSS
+                const safeName = this.escapeHtml(u.name);
+                const safeUsername = this.escapeHtml(u.username);
+                const safeRole = this.escapeHtml(u.role);
+                const safeAvatar = this.sanitizeUrl(u.avatar) || `https://ui-avatars.com/api/?name=${encodeURIComponent(u.name)}&background=random`;
                 const isActive = u.is_active == 1;
 
                 html += `
                     <tr style="background:white; box-shadow:0 1px 3px rgba(0,0,0,0.05); border-radius:8px;">
                         <td style="padding:12px 16px; border-radius:8px 0 0 8px;">
                             <div style="display:flex; align-items:center; gap:12px;">
-                                <img src="${avatar}" style="width:40px; height:40px; border-radius:50%; object-fit:cover; border:2px solid var(--slate-100);">
+                                <img src="${safeAvatar}" style="width:40px; height:40px; border-radius:50%; object-fit:cover; border:2px solid var(--slate-100);" onerror="this.src='https://ui-avatars.com/api/?name=User'">
                                 <div>
-                                    <div style="font-weight:600; color:var(--slate-800);">${u.name}</div>
-                                    <div style="font-size:12px; color:var(--slate-500);">@${u.username}</div>
+                                    <div style="font-weight:600; color:var(--slate-800);">${safeName}</div>
+                                    <div style="font-size:12px; color:var(--slate-500);">@${safeUsername}</div>
                                 </div>
                             </div>
                         </td>
                         <td style="padding:12px 16px;">
                             <span class="category-badge ${this.getCategoryClass(u.role === 'Admin' ? 'Admin' : u.role)}" style="font-size:11px;">
-                                ${u.role}
+                                ${safeRole}
                             </span>
                         </td>
                         <td style="padding:12px 16px;">
@@ -1369,7 +2561,7 @@ const App = {
                 this.showToast('User berhasil dibuat', 'success');
             }
             this.closeModal('modal-user-form');
-            this.loadUsersTable();
+            await this.loadUsersTable();
         } catch (error) {
             this.showToast(error.message, 'error');
         }
@@ -1377,7 +2569,15 @@ const App = {
 
     initRequestForm() {
         document.getElementById('form-request').reset();
+        const reqAtt = document.getElementById('request-attachment-required');
+        if (reqAtt) reqAtt.checked = false;
+
         document.getElementById('request-staff-timeline').innerHTML = '<p class="text-muted text-center" style="padding:20px;">Pilih staff untuk melihat jadwal</p>';
+
+        // Initialize mentions for request
+        this.resetMentions('request-mentions-selected', 'requestMentions');
+        this.populateMentionsDropdown('request-mentions');
+        this.handleMentionSelect('request-mentions', 'request-mentions-selected', 'requestMentions');
 
         // Set Default Date
         const today = new Date().toISOString().split('T')[0];
@@ -1405,24 +2605,31 @@ const App = {
         // Populate staff select options
         const select = document.getElementById('request-to');
         if (select) {
-            select.innerHTML = '<option value="">Memuat staff...</option>';
             // Bind change event to load schedule
             select.onchange = (e) => this.loadStaffScheduleForRequest(e.target.value);
 
-            // Fetch all users except admin (or include admin if needed)
-            API.getUsers({ department: 'All' }).then(res => {
+            // Use cached staff list
+            const populate = () => {
                 select.innerHTML = '<option value="">Pilih Staff...</option>';
-                if (res.users) {
-                    res.users.forEach(u => {
-                        if (u.id != this.state.user.id && u.role !== 'Admin') {
-                            const opt = document.createElement('option');
-                            opt.value = u.id;
-                            opt.textContent = `${u.name} (${u.role})`;
-                            select.appendChild(opt);
-                        }
-                    });
-                }
-            });
+                const list = this.allStaffList.length > 0 ? this.allStaffList : [];
+
+                list.forEach(u => {
+                    // Filter out self
+                    if (u.id != this.state.user.id) {
+                        const opt = document.createElement('option');
+                        opt.value = u.id;
+                        opt.textContent = `${u.name} (${u.role})`;
+                        select.appendChild(opt);
+                    }
+                });
+            };
+
+            if (this.allStaffList.length === 0) {
+                select.innerHTML = '<option value="">Memuat staff...</option>';
+                this.loadAllStaff().then(populate);
+            } else {
+                populate();
+            }
         }
     },
 
@@ -1557,12 +2764,18 @@ const App = {
             return;
         }
 
+        const attachmentRequired = document.getElementById('request-attachment-required').checked ? 1 : 0;
+
+        // Get submit button and show loading
+        const submitBtn = document.querySelector('#modal-request .btn-rose');
+        this.setButtonLoading(submitBtn, true);
+
         try {
             // Determine Start Time default (09:00 if future date, now if today)
             const today = new Date().toISOString().split('T')[0];
             const startTime = (reqDate === today) ? new Date().toTimeString().substring(0, 5) : '09:00';
 
-            // Create task as request
+            // Create task as request with mentions
             await API.createTask({
                 title: title,
                 checklist: desc ? [desc] : [], // Treat desc as checklist item or separate
@@ -1571,13 +2784,23 @@ const App = {
                 end_time: deadline || '17:00',
                 start_time: startTime,
                 task_date: reqDate || this.state.selectedDate,
-                kanban_status: 'todo'
-            });
-            this.showToast('Request berhasil dikirim', 'success');
+                attachment_required: attachmentRequired,
+                kanban_status: 'todo',
+                mentions: this.state.requestMentions // Add mentions
+            }); // End createTask
+
+            // Show different toast if mentions were added
+            if (this.state.requestMentions.length > 0) {
+                this.showToast(`Request dikirim ✓ (${this.state.requestMentions.length} staff akan dinotifikasi)`, 'success');
+            } else {
+                this.showToast('Request berhasil dikirim ✓', 'success');
+            }
             this.closeModal('modal-request');
-            this.loadTimeline();
+            await this.loadTimeline();
         } catch (error) {
             this.showToast('Gagal kirim request: ' + error.message, 'error');
+        } finally {
+            this.setButtonLoading(submitBtn, false);
         }
     },
 

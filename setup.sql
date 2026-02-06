@@ -54,6 +54,7 @@ CREATE TABLE IF NOT EXISTS checklist_items (
     task_id INT NOT NULL,
     text VARCHAR(500) NOT NULL,
     is_done TINYINT(1) DEFAULT 0,
+    completed_at TIMESTAMP NULL DEFAULT NULL,
     sort_order INT DEFAULT 0,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
@@ -93,7 +94,7 @@ CREATE TABLE IF NOT EXISTS notifications (
     user_id INT NOT NULL,
     title VARCHAR(255) NOT NULL,
     message TEXT NOT NULL,
-    type ENUM('info', 'warning', 'success', 'error', 'deadline', 'transition', 'request') DEFAULT 'info',
+    type ENUM('info', 'warning', 'success', 'error', 'deadline', 'transition', 'request', 'mention', 'completed') DEFAULT 'info',
     task_id INT DEFAULT NULL,
     is_read TINYINT(1) DEFAULT 0,
     is_browser_sent TINYINT(1) DEFAULT 0,
@@ -103,6 +104,21 @@ CREATE TABLE IF NOT EXISTS notifications (
     FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE,
     INDEX idx_user_read (user_id, is_read),
     INDEX idx_scheduled (scheduled_at, is_browser_sent)
+);
+
+-- =====================================================
+-- 6B. TASK MENTIONS TABLE (for collaboration)
+-- =====================================================
+CREATE TABLE IF NOT EXISTS task_mentions (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    task_id INT NOT NULL,
+    user_id INT NOT NULL,
+    notified_on_complete TINYINT(1) DEFAULT 0,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    UNIQUE KEY unique_mention (task_id, user_id),
+    INDEX idx_user (user_id)
 );
 
 -- =====================================================

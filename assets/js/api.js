@@ -173,6 +173,13 @@ const API = {
         });
     },
 
+    async deleteAttachment(attachmentId) {
+        return this.request('comments.php?action=delete_attachment', {
+            method: 'POST',
+            body: JSON.stringify({ id: attachmentId })
+        });
+    },
+
     // Notifications
     async getNotifications(limit = 50) {
         return this.request(`notifications.php?action=list&limit=${limit}`);

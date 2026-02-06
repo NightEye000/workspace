@@ -36,12 +36,14 @@ function generateAvatar($seed) {
 
 /**
  * Sanitize Input
+ * Note: We only trim here. HTML escaping is done on the frontend at render time
+ * to prevent double-escaping issues. SQL injection is prevented by using PDO prepared statements.
  */
 function sanitize($input) {
     if (is_array($input)) {
         return array_map('sanitize', $input);
     }
-    return htmlspecialchars(trim($input), ENT_QUOTES, 'UTF-8');
+    return trim($input);
 }
 
 /**
@@ -175,8 +177,21 @@ function getCSRFToken() {
  * Verify CSRF Token
  */
 function verifyCSRFToken() {
-    $headers = apache_request_headers();
-    $token = $headers['X-CSRF-Token'] ?? $_SERVER['HTTP_X_CSRF_TOKEN'] ?? '';
+    // Fallback for non-Apache servers (nginx, etc.)
+    $headers = [];
+    if (function_exists('apache_request_headers')) {
+        $headers = apache_request_headers();
+    } else {
+        // Manual header extraction for non-Apache
+        foreach ($_SERVER as $key => $value) {
+            if (substr($key, 0, 5) === 'HTTP_') {
+                $headerKey = str_replace(' ', '-', ucwords(strtolower(str_replace('_', ' ', substr($key, 5)))));
+                $headers[$headerKey] = $value;
+            }
+        }
+    }
+    
+    $token = $headers['X-Csrf-Token'] ?? $headers['X-CSRF-Token'] ?? $_SERVER['HTTP_X_CSRF_TOKEN'] ?? '';
     
     if (empty($token) || $token !== getCSRFToken()) {
         jsonResponse(['success' => false, 'message' => 'Invalid CSRF Token'], 403);

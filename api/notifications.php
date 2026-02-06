@@ -36,10 +36,15 @@ switch ($action) {
 function getNotifications() {
     $db = getDB();
     $currentUser = getCurrentUser();
-    $limit = $_GET['limit'] ?? 50;
+    $limit = isset($_GET['limit']) ? (int)$_GET['limit'] : 50;
+    
+    // Validate limit range to prevent abuse
+    $limit = max(1, min($limit, 200));
     
     $stmt = $db->prepare("SELECT n.*, t.title as task_title FROM notifications n LEFT JOIN tasks t ON n.task_id = t.id WHERE n.user_id = ? ORDER BY n.created_at DESC LIMIT ?");
-    $stmt->execute([$currentUser['id'], (int)$limit]);
+    $stmt->bindValue(1, $currentUser['id'], PDO::PARAM_INT);
+    $stmt->bindValue(2, $limit, PDO::PARAM_INT);
+    $stmt->execute();
     jsonResponse(['success' => true, 'notifications' => $stmt->fetchAll()]);
 }
 

@@ -40,6 +40,28 @@ function handleLogin() {
         jsonResponse(['success' => false, 'message' => 'Method not allowed'], 405);
     }
     
+    // Rate limiting - simple session-based implementation
+    $maxAttempts = 5;
+    $lockoutTime = 300; // 5 minutes in seconds
+    
+    if (!isset($_SESSION['login_attempts'])) {
+        $_SESSION['login_attempts'] = 0;
+        $_SESSION['first_attempt_time'] = time();
+    }
+    
+    // Reset counter if lockout time has passed
+    if (isset($_SESSION['first_attempt_time']) && (time() - $_SESSION['first_attempt_time']) > $lockoutTime) {
+        $_SESSION['login_attempts'] = 0;
+        $_SESSION['first_attempt_time'] = time();
+    }
+    
+    // Check if locked out
+    if ($_SESSION['login_attempts'] >= $maxAttempts) {
+        $remainingTime = $lockoutTime - (time() - $_SESSION['first_attempt_time']);
+        $minutes = ceil($remainingTime / 60);
+        jsonResponse(['success' => false, 'message' => "Terlalu banyak percobaan login. Coba lagi dalam $minutes menit."], 429);
+    }
+    
     $input = json_decode(file_get_contents('php://input'), true);
     $username = sanitize($input['username'] ?? '');
     $password = $input['password'] ?? '';
@@ -54,15 +76,24 @@ function handleLogin() {
     $user = $stmt->fetch();
     
     if (!$user) {
+        $_SESSION['login_attempts']++;
         jsonResponse(['success' => false, 'message' => 'Username tidak ditemukan'], 401);
     }
     
     if (!verifyPassword($password, $user['password'])) {
+        $_SESSION['login_attempts']++;
         jsonResponse(['success' => false, 'message' => 'Password salah'], 401);
     }
     
+    // Reset login attempts on successful login
+    $_SESSION['login_attempts'] = 0;
+    unset($_SESSION['first_attempt_time']);
+    
     // Remove password from session data
     unset($user['password']);
+    
+    // Regenerate session ID to prevent session fixation attacks
+    session_regenerate_id(true);
     
     $_SESSION['user'] = $user;
     $_SESSION['login_time'] = time();

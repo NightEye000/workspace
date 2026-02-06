@@ -130,11 +130,14 @@
                             <i data-lucide="user" style="width: 14px; height: 14px; margin-right: 4px; display: inline-block; vertical-align: text-top;"></i>
                             Hanya Saya
                         </button>
+                        <button class="toggle-btn" data-view="list" onclick="App.setViewMode('list')">
+                            <i data-lucide="list" style="width: 14px; height: 14px; margin-right: 4px; display: inline-block; vertical-align: text-top;"></i>
+                            Daftar Tugas
+                        </button>
                     </div>
                     <p>Jadwal: <span id="selected-date-label"></span></p>
                     <div class="date-picker-wrapper">
-                        <i data-lucide="calendar"></i>
-                        <input type="date" id="date-picker">
+                        <input type="date" id="date-picker" onclick="try{this.showPicker()}catch(e){}">
                     </div>
                 </div>
                 <div class="page-header-right">
@@ -148,6 +151,77 @@
             <!-- Timeline Container -->
             <div id="timeline-container" class="timeline-container">
                 <!-- Timeline will be rendered here -->
+            </div>
+
+            <!-- List View Container (Hidden by default) -->
+            <div id="list-view-container" class="list-view-container hidden">
+                <!-- Filters Row -->
+                <div class="list-view-filters">
+                    <div class="filter-group">
+                        <button class="filter-chip active" data-filter="me" onclick="App.setListFilter('me', this)">Tugas Saya</button>
+                        <button class="filter-chip" data-filter="all" onclick="App.setListFilter('all', this)">Semua Staff</button>
+                    </div>
+                    
+                        <!-- New Custom Date Filter Trigger -->
+                        <div class="date-filter-wrapper" style="position:relative;">
+                            <button id="date-filter-btn" class="btn btn-outline btn-sm" onclick="App.toggleDateFilter()">
+                                <i data-lucide="calendar"></i>
+                                <span id="date-filter-label">Rentang Waktu</span>
+                                <i data-lucide="chevron-down" style="width:14px; margin-left:4px;"></i>
+                            </button>
+
+                            <!-- Custom Dropdown -->
+                            <div id="date-filter-dropdown" class="date-filter-dropdown hidden">
+                                <div class="filter-sidebar">
+                                    <button onclick="App.applyDatePreset('today')" class="preset-btn" data-preset="today">Hari Ini</button>
+                                    <button onclick="App.applyDatePreset('yesterday')" class="preset-btn" data-preset="yesterday">Kemarin</button>
+                                    <button onclick="App.applyDatePreset('last_7_days')" class="preset-btn" data-preset="last_7_days">7 Hari Terakhir</button>
+                                    <button onclick="App.applyDatePreset('last_30_days')" class="preset-btn" data-preset="last_30_days">30 Hari Terakhir</button>
+                                    <button onclick="App.applyDatePreset('month_current')" class="preset-btn" data-preset="month_current">Bulan Ini</button>
+                                    <button onclick="App.applyDatePreset('month_last')" class="preset-btn" data-preset="month_last">Bulan Lalu</button>
+                                    <button onclick="App.applyDatePreset('all_time')" class="preset-btn" data-preset="all_time">Semua Waktu</button>
+                                </div>
+                                <div class="filter-custom">
+                                    <div class="custom-header">CUSTOM RANGE</div>
+                                    
+                                    <!-- Selected Date Display -->
+                                    <div class="selected-range-display">
+                                        <div class="range-item">
+                                            <label>Dari</label>
+                                            <span id="display-start-date">-</span>
+                                        </div>
+                                        <div class="range-arrow">→</div>
+                                        <div class="range-item">
+                                            <label>Sampai</label>
+                                            <span id="display-end-date">-</span>
+                                        </div>
+                                    </div>
+
+                                    <!-- Dual Calendar Widget -->
+                                    <div class="dual-calendar-container">
+                                        <div class="calendar-nav">
+                                            <button onclick="App.calendarPrevMonth()"><i data-lucide="chevron-left"></i></button>
+                                            <button onclick="App.calendarNextMonth()"><i data-lucide="chevron-right"></i></button>
+                                        </div>
+                                        <div class="calendars-wrapper">
+                                            <div id="calendar-left" class="calendar-month"></div>
+                                            <div id="calendar-right" class="calendar-month"></div>
+                                        </div>
+                                    </div>
+                                    
+                                    <div class="filter-actions-bottom">
+                                         <button class="btn btn-ghost btn-xs text-danger" onclick="App.clearDateFilter()">Hapus Filter</button>
+                                         <button class="btn btn-primary btn-xs" onclick="App.applyCustomDateRange()">Terapkan</button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                </div>
+
+                <!-- List Content -->
+                <div id="list-view-content" class="list-view-content">
+                    <!-- Tasks will be rendered here -->
+                </div>
             </div>
         </main>
 
@@ -232,6 +306,11 @@
                         <option value="Inisiatif">Inisiatif Kerjaan</option>
                     </select>
                 </div>
+
+                <div id="work-deadline-group" class="form-group hidden">
+                    <label>Tanggal Deadline</label>
+                    <input type="date" id="work-deadline-date">
+                </div>
                 
                 <!-- Routine Options (for Jobdesk) -->
                 <div id="routine-options" class="routine-options">
@@ -275,10 +354,65 @@
                         <input type="time" id="work-end" value="12:00">
                     </div>
                 </div>
+
+                <div class="form-group" style="margin-top: 8px;">
+                    <label class="checkbox-label" style="
+                        display: flex; 
+                        align-items: center; 
+                        gap: 10px;
+                        padding: 12px 16px; 
+                        background: linear-gradient(135deg, #fff1f2 0%, #fce7f3 100%); 
+                        border: 1px solid #fecdd3; 
+                        border-radius: 10px;
+                        cursor: pointer;
+                        transition: all 0.2s;
+                    ">
+                        <input type="checkbox" id="work-attachment-required" style="
+                            width: 18px; 
+                            height: 18px; 
+                            accent-color: #e11d48;
+                            cursor: pointer;
+                        ">
+                        <span style="font-weight: 600; color: #be123c; font-size: 0.85rem;">
+                            📎 Wajib Lampiran (Bukti Foto/File) untuk Selesai
+                        </span>
+                    </label>
+                </div>
+
                 
                 <div class="form-group">
                     <label>Checklist (Enter untuk baris baru)</label>
                     <textarea id="work-checklist" rows="4" placeholder="- Siapkan data&#10;- Siapkan presentasi"></textarea>
+                </div>
+
+                <!-- Mentions/Tag Section -->
+                <div class="form-group" style="margin-top: 8px;">
+                    <label style="display: flex; align-items: center; gap: 6px; margin-bottom: 8px;">
+                        <i data-lucide="at-sign" style="width: 16px; height: 16px; color: var(--primary);"></i>
+                        Tag Staff untuk Notifikasi Selesai
+                        <span style="font-size: 0.75rem; color: var(--slate-500); font-weight: 400;">(Opsional)</span>
+                    </label>
+                    <div id="work-mentions-container" style="
+                        border: 1px solid var(--slate-200);
+                        border-radius: 10px;
+                        padding: 12px;
+                        background: var(--slate-50);
+                        min-height: 40px;
+                    ">
+                        <div id="work-mentions-selected" style="display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px;"></div>
+                        <select id="work-mentions" style="
+                            width: 100%;
+                            padding: 8px 12px;
+                            border: 1px solid var(--slate-200);
+                            border-radius: 8px;
+                            font-size: 0.85rem;
+                        ">
+                            <option value="">+ Pilih staff untuk di-tag...</option>
+                        </select>
+                    </div>
+                    <p style="font-size: 0.75rem; color: var(--slate-500); margin-top: 6px;">
+                        Staff yang di-tag akan menerima notifikasi ketika tugas ini selesai
+                    </p>
                 </div>
                 
                 <button type="submit" id="btn-submit-work" class="btn btn-primary btn-block">
@@ -334,6 +468,60 @@
                                 <input type="time" id="request-deadline" value="17:00" required>
                             </div>
                         </div>
+
+                        <div class="form-group" style="margin-top: 8px;">
+                            <label class="checkbox-label" style="
+                                display: flex; 
+                                align-items: center; 
+                                gap: 10px;
+                                padding: 12px 16px; 
+                                background: linear-gradient(135deg, #fff1f2 0%, #fce7f3 100%); 
+                                border: 1px solid #fecdd3; 
+                                border-radius: 10px;
+                                cursor: pointer;
+                                transition: all 0.2s;
+                            ">
+                                <input type="checkbox" id="request-attachment-required" style="
+                                    width: 18px; 
+                                    height: 18px; 
+                                    accent-color: #e11d48;
+                                    cursor: pointer;
+                                ">
+                                <span style="font-weight: 600; color: #be123c; font-size: 0.85rem;">
+                                    📎 Wajib Lampiran untuk Selesai
+                                </span>
+                            </label>
+                        </div>
+
+                        <!-- Mentions/Tag Section for Request -->
+                        <div class="form-group" style="margin-top: 8px;">
+                            <label style="display: flex; align-items: center; gap: 6px; margin-bottom: 8px;">
+                                <i data-lucide="at-sign" style="width: 16px; height: 16px; color: var(--rose);"></i>
+                                Tag Staff Lain untuk Notifikasi
+                                <span style="font-size: 0.75rem; color: var(--slate-500); font-weight: 400;">(Opsional)</span>
+                            </label>
+                            <div id="request-mentions-container" style="
+                                border: 1px solid var(--slate-200);
+                                border-radius: 10px;
+                                padding: 12px;
+                                background: var(--slate-50);
+                                min-height: 40px;
+                            ">
+                                <div id="request-mentions-selected" style="display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px;"></div>
+                                <select id="request-mentions" style="
+                                    width: 100%;
+                                    padding: 8px 12px;
+                                    border: 1px solid var(--slate-200);
+                                    border-radius: 8px;
+                                    font-size: 0.85rem;
+                                ">
+                                    <option value="">+ Pilih staff untuk di-tag...</option>
+                                </select>
+                            </div>
+                            <p style="font-size: 0.75rem; color: var(--slate-500); margin-top: 6px;">
+                                Staff yang di-tag akan menerima notifikasi ketika request ini selesai
+                            </p>
+                        </div>
                         
                         <button type="submit" class="btn btn-rose btn-block">
                             <i data-lucide="send"></i>
@@ -375,7 +563,7 @@
     </div>
 
     <!-- Add/Edit User Modal -->
-    <div id="modal-user-form" class="modal hidden">
+    <div id="modal-user-form" class="modal modal-top hidden">
         <div class="modal-header">
             <h3 id="user-form-title">Tambah User</h3>
             <button class="modal-close" data-modal="modal-user-form">
@@ -409,6 +597,45 @@
         </div>
     </div>
 
+    <!-- Add Attachment Modal -->
+    <div id="modal-attachment" class="modal hidden">
+        <div class="modal-header">
+            <h3>Tambah Lampiran</h3>
+            <button class="modal-close" data-modal="modal-attachment">
+                <i data-lucide="x"></i>
+            </button>
+        </div>
+        <div class="modal-body">
+            <form id="form-attachment">
+                <input type="hidden" id="att-task-id">
+                <div class="form-group">
+                    <label>Nama Lampiran</label>
+                    <input type="text" id="att-name" placeholder="Misal: Link Google Drive" required>
+                </div>
+                <div class="form-group">
+                    <label>URL / Link</label>
+                    <input type="url" id="att-url" placeholder="https://..." required>
+                </div>
+                <button type="submit" class="btn btn-primary btn-block">Simpan</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Custom Confirm Modal -->
+    <div id="modal-confirm" class="modal hidden" style="max-width:320px;">
+        <div class="modal-body text-center" style="padding: 24px;">
+            <div style="background:#fee2e2; width:48px; height:48px; border-radius:50%; margin:0 auto 16px; display:flex; align-items:center; justify-content:center; color:#ef4444;">
+                <i data-lucide="alert-triangle"></i>
+            </div>
+            <h3 id="confirm-title" style="font-size:1.1rem; font-weight:700; color:#1e293b; margin-bottom:8px;">Konfirmasi</h3>
+            <p id="confirm-msg" style="color:#64748b; font-size:0.9rem; margin-bottom:24px;">Yakin ingin melakukan ini?</p>
+            <div style="display:flex; gap:12px;">
+                <button id="btn-confirm-cancel" class="btn btn-outline" style="flex:1;">Batal</button>
+                <button id="btn-confirm-yes" class="btn btn-danger" style="flex:1;">Ya, Hapus</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Notification Blocker Overlay -->
     <div id="notification-blocker" class="modal-overlay hidden" style="z-index: 9999; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,0.9);">
         <div class="modal-content" style="background: white; padding: 2rem; border-radius: 12px; max-width: 400px; text-align: center;">
@@ -429,8 +656,8 @@
     </div>
 
     <!-- Scripts -->
-    <script src="assets/js/api.js"></script>
-    <script src="assets/js/notifications.js"></script>
-    <script src="assets/js/app.js"></script>
+    <script src="assets/js/api.js?v=<?php echo time(); ?>"></script>
+    <script src="assets/js/notifications.js?v=<?php echo time(); ?>"></script>
+    <script src="assets/js/app.js?v=<?php echo time(); ?>"></script>
 </body>
 </html>

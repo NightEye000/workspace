@@ -133,8 +133,8 @@ function createUser() {
         jsonResponse(['success' => false, 'message' => 'Role tidak valid'], 400);
     }
     
-    if (strlen($password) < 8) {
-        jsonResponse(['success' => false, 'message' => 'Password minimal 8 karakter'], 400);
+    if (strlen($password) < 4) {
+        jsonResponse(['success' => false, 'message' => 'Password minimal 4 karakter'], 400);
     }
     
     $db = getDB();
@@ -209,8 +209,8 @@ function updateUser() {
     
     // Password update if provided
     if (!empty($password)) {
-        if (strlen($password) < 8) {
-            jsonResponse(['success' => false, 'message' => 'Password minimal 8 karakter'], 400);
+        if (strlen($password) < 4) {
+            jsonResponse(['success' => false, 'message' => 'Password minimal 4 karakter'], 400);
         }
         $sql .= ", password = ?";
         $params[] = hashPassword($password);
