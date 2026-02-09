@@ -46,7 +46,11 @@ const App = {
 
         // List View State
         listFilter: 'me',     // 'me' or 'all'
-        timeFilter: 'all_time'   // Changed default to 'all_time' per user request
+        timeFilter: 'today',   // Changed default to 'today' for performance
+
+        // Concurrent load prevention
+        isLoadingTimeline: false,
+        isLoadingListView: false
     },
 
     els: {},
@@ -291,11 +295,16 @@ const App = {
         this.cacheDom();
         this.bindEvents();
         this.initDatePicker();
-        this.hideLoading();
-        this.checkAuth();
+
+        // Ensure Lucide icons are ready
         this.initIcons();
 
-        this.checkNotificationBlocking();
+        // checkAuth will handle showing login or main app
+        // and it will finally call hideLoading()
+        this.checkAuth().finally(() => {
+            this.hideLoading();
+            this.checkNotificationBlocking();
+        });
 
         // Global error handler for unhandled promise rejections
         window.addEventListener('unhandledrejection', (event) => {
@@ -585,17 +594,29 @@ const App = {
 
     async checkAuth() {
         try {
-            const result = await API.checkAuth();
+            // Add a timeout to prevent infinite loading if the server doesn't respond
+            const authPromise = API.checkAuth();
+            const timeoutPromise = new Promise((_, reject) =>
+                setTimeout(() => reject(new Error('Koneksi timeout (15s)')), 15000)
+            );
+
+            const result = await Promise.race([authPromise, timeoutPromise]);
+
             if (result && result.loggedIn) {
                 this.state.user = result.user;
                 if (result.csrf_token) API.setCSRFToken(result.csrf_token);
                 this.showMain();
                 if (window.NotificationManager) window.NotificationManager.init();
+
+                // Auto-generate routines for today
+                API.generateRoutines().catch(err => console.error('Auto-routine gen failed', err));
+
                 this.populateDepartments();
             } else {
                 this.showLogin();
             }
         } catch (error) {
+            console.error('[App] Auth Check Error:', error);
             this.showLogin();
             this.showToast('Gagal cek login: ' + error.message, 'error');
         }
@@ -1120,6 +1141,9 @@ const App = {
         const container = document.getElementById('list-view-content');
         if (!container) return;
 
+        if (this.state.isLoadingListView) return;
+        this.state.isLoadingListView = true;
+
         container.innerHTML = '<div class="flex-center p-4"><div class="spinner"></div></div>';
 
         try {
@@ -1147,6 +1171,8 @@ const App = {
         } catch (error) {
             console.error(error);
             container.innerHTML = '<div class="text-danger p-4">Gagal memuat daftar tugas</div>';
+        } finally {
+            this.state.isLoadingListView = false;
         }
     },
 
@@ -1310,12 +1336,19 @@ const App = {
 
         Object.keys(grouped).sort((a, b) => new Date(b) - new Date(a)).forEach(date => {
             const tasks = grouped[date];
+            const total = tasks.length;
+            const completed = tasks.filter(t => t.is_completed).length;
 
             html += `
                 <div class="history-date-group">
-                    <div class="history-date-header">
-                        <i data-lucide="calendar"></i>
-                        ${formatDate(date)}
+                    <div class="history-date-header" style="display:flex; justify-content:space-between; align-items:center;">
+                        <div style="display:flex; align-items:center; gap:8px;">
+                            <i data-lucide="calendar"></i>
+                            ${formatDate(date)}
+                        </div>
+                        <div class="history-stats" style="font-size:0.8rem; font-weight:600; color:var(--slate-500);">
+                            ${completed}/${total} Selesai
+                        </div>
                     </div>
                     <div class="history-tasks">
             `;
@@ -1371,6 +1404,9 @@ const App = {
     },
 
     async loadTimeline() {
+        if (this.state.isLoadingTimeline) return;
+        this.state.isLoadingTimeline = true;
+
         this.showLoading();
         try {
             const params = {
@@ -1414,9 +1450,11 @@ const App = {
             this.renderTimeline(staffList);
 
         } catch (error) {
+            console.error('[App] loadTimeline Error:', error);
             this.showToast('Gagal memuat timeline: ' + error.message, 'error');
         } finally {
             this.hideLoading();
+            this.state.isLoadingTimeline = false;
         }
     },
 

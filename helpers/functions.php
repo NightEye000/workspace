@@ -7,11 +7,54 @@
  * Send JSON Response
  */
 function jsonResponse($data, $statusCode = 200) {
-    http_response_code($statusCode);
-    header('Content-Type: application/json');
+    if (!headers_sent()) {
+        http_response_code($statusCode);
+        header('Content-Type: application/json');
+    }
     echo json_encode($data);
     exit;
 }
+
+// Global Exception Handler
+set_exception_handler(function ($e) {
+    error_log("Unhandled Exception: " . $e->getMessage() . " in " . $e->getFile() . ":" . $e->getLine());
+    jsonResponse([
+        'success' => false,
+        'message' => 'Internal Server Error: ' . $e->getMessage(),
+        'error_type' => get_class($e)
+    ], 500);
+});
+
+// Global Error Handler
+set_error_handler(function ($errno, $errstr, $errfile, $errline) {
+    if (!(error_reporting() & $errno)) return false;
+    
+    error_log("PHP Error [$errno]: $errstr in $errfile:$errline");
+    
+    // For fatal-like errors, return JSON
+    if (in_array($errno, [E_ERROR, E_USER_ERROR, E_RECOVERABLE_ERROR])) {
+        jsonResponse([
+            'success' => false,
+            'message' => "Fatal Error: $errstr",
+            'file' => basename($errfile),
+            'line' => $errline
+        ], 500);
+    }
+    return false;
+});
+
+// Register shutdown function for fatal errors not caught by error handler
+register_shutdown_function(function () {
+    $error = error_get_last();
+    if ($error !== NULL && in_array($error['type'], [E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR])) {
+        error_log("Fatal Shutdown Error: " . $error['message']);
+        jsonResponse([
+            'success' => false,
+            'message' => 'Fatal Execution Error: ' . $error['message'],
+            'type' => $error['type']
+        ], 500);
+    }
+});
 
 /**
  * Hash Password

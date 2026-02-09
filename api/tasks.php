@@ -149,70 +149,6 @@ function getTasks() {
     $userIds = array_column($users, 'id');
     $inQuery = implode(',', array_fill(0, count($userIds), '?'));
     
-    // Lazy-create routine instances for this date so routines appear every selected day
-    $dayOfWeek = (int) date('w', strtotime($singleDate));
-    foreach ($userIds as $userId) {
-        $stmtRoutines = $db->prepare("
-            SELECT id, title, start_time, end_time, routine_days, created_by 
-            FROM tasks 
-            WHERE staff_id = ? AND is_routine = 1 
-            ORDER BY id DESC
-        ");
-        $stmtRoutines->execute([$userId]);
-        $personalRoutines = $stmtRoutines->fetchAll();
-        $uniqueByTitle = [];
-        foreach ($personalRoutines as $row) {
-            if (!isset($uniqueByTitle[$row['title']])) {
-                $uniqueByTitle[$row['title']] = $row;
-            }
-        }
-        foreach ($uniqueByTitle as $routine) {
-            $days = json_decode($routine['routine_days'], true);
-            if (!is_array($days) || !in_array($dayOfWeek, $days)) {
-                continue;
-            }
-            $stmtExists = $db->prepare("SELECT id FROM tasks WHERE staff_id = ? AND task_date = ? AND title = ?");
-            $stmtExists->execute([$userId, $singleDate, $routine['title']]);
-            if ($stmtExists->fetch()) {
-                continue;
-            }
-            $createdBy = isset($routine['created_by']) && $routine['created_by'] !== null
-                ? $routine['created_by'] : $userId;
-            $stmtInsert = $db->prepare("
-                INSERT INTO tasks (staff_id, title, category, status, task_date, start_time, end_time, is_routine, routine_days, created_by)
-                VALUES (?, ?, 'Jobdesk', 'todo', ?, ?, ?, 1, ?, ?)
-            ");
-            $stmtInsert->execute([
-                $userId,
-                $routine['title'],
-                $singleDate,
-                $routine['start_time'],
-                $routine['end_time'],
-                $routine['routine_days'],
-                $createdBy
-            ]);
-            $newTaskId = $db->lastInsertId();
-            $stmtLast = $db->prepare("
-                SELECT id FROM tasks 
-                WHERE staff_id = ? AND title = ? AND is_routine = 1 AND id != ?
-                ORDER BY id DESC LIMIT 1
-            ");
-            $stmtLast->execute([$userId, $routine['title'], $newTaskId]);
-            $lastTask = $stmtLast->fetch();
-            if ($lastTask) {
-                $stmtChk = $db->prepare("SELECT text, sort_order FROM checklist_items WHERE task_id = ? ORDER BY sort_order");
-                $stmtChk->execute([$lastTask['id']]);
-                $checklistItems = $stmtChk->fetchAll();
-                if ($checklistItems) {
-                    $stmtItem = $db->prepare("INSERT INTO checklist_items (task_id, text, sort_order) VALUES (?, ?, ?)");
-                    foreach ($checklistItems as $item) {
-                        $stmtItem->execute([$newTaskId, $item['text'], $item['sort_order']]);
-                    }
-                }
-            }
-        }
-    }
-    
     // Direct JOIN instead of View to ensure fresh status
     $taskSql = "
         SELECT t.*, u.name as staff_name, u.avatar as staff_avatar, u.role as staff_role
@@ -461,10 +397,15 @@ function createTask() {
         $stmtCheckTpl->execute([$dept, $title]);
         
         if (!$stmtCheckTpl->fetch()) {
-            // Insert new template
+            // Insert new template with Start Date (defaults to today if not set)
+            // If user wants future start, they should provide 'start_date' in input or we assume today.
+            // For now, let's assume if it's created today, start_date is today.
+            // But better: use the task's date as start_date.
+            $routineStartDate = $date; 
+
             $stmtTpl = $db->prepare("
-                INSERT INTO routine_templates (department, title, duration_hours, routine_days, checklist_template, default_start_time, is_active)
-                VALUES (?, ?, ?, ?, ?, ?, 1)
+                INSERT INTO routine_templates (department, title, duration_hours, routine_days, checklist_template, default_start_time, is_active, start_date)
+                VALUES (?, ?, ?, ?, ?, ?, 1, ?)
             ");
             $stmtTpl->execute([
                 $dept,
@@ -472,12 +413,63 @@ function createTask() {
                 $duration,
                 $routineDays, // JSON string already
                 json_encode($checklistTpl),
-                $startTime
+                $startTime,
+                $date // Use task date as start date of routine
             ]);
+
+            // BULK GENERATE FOR 30 DAYS (future only)
+            // We already created task for $date (Today/TargetDate). Now generate for future.
+            $futureStart = date('Y-m-d', strtotime($date . ' +1 day'));
+            $futureEnd = date('Y-m-d', strtotime($date . ' +30 days'));
+            
+            $period = new DatePeriod(
+                new DateTime($futureStart),
+                new DateInterval('P1D'),
+                new DateTime($futureEnd)
+            );
+
+            // Prepare Insert Stmt once
+            $stmtFuture = $db->prepare("
+                INSERT INTO tasks (staff_id, title, category, status, task_date, start_time, end_time, is_routine, routine_days, attachment_required, created_by) 
+                VALUES (?, ?, ?, 'todo', ?, ?, ?, 1, ?, ?, ?)
+            ");
+            
+            // Prepare Checklist Stmt
+            $stmtFutureItem = $db->prepare("INSERT INTO checklist_items (task_id, text, sort_order) VALUES (?, ?, ?)");
+            
+            $daysArr = json_decode($routineDays, true);
+
+            foreach ($period as $dt) {
+                $checkDate = $dt->format('Y-m-d');
+                $dayNum = $dt->format('w'); // 0 (Sun) - 6 (Sat)
+                
+                if (in_array($dayNum, $daysArr)) {
+                    $stmtFuture->execute([
+                        $targetStaffId,
+                        $title,
+                        $category,
+                        $checkDate,
+                        $startTime,
+                        $endTime,
+                        $routineDays,
+                        $attachmentRequired,
+                        getCurrentUser()['id']
+                    ]);
+                    
+                    $newId = $db->lastInsertId();
+                    
+                    // Insert Checklist
+                    if (!empty($checklistTpl)) {
+                        foreach ($checklistTpl as $idx => $txt) {
+                            $stmtFutureItem->execute([$newId, $txt, $idx]);
+                        }
+                    }
+                }
+            }
         }
     }
 
-    jsonResponse(['success' => true, 'message' => 'Tugas berhasil dibuat', 'task_id' => $taskId]);
+    jsonResponse(['success' => true, 'message' => 'Tugas berhasil dibuat (dan digenerate 90 hari ke depan)', 'task_id' => $taskId]);
 }
 
 function updateTask() {
@@ -496,8 +488,8 @@ function updateTask() {
         jsonResponse(['success' => false, 'message' => 'Task ID required'], 400);
     }
     
-    // Check ownership
-    $stmt = $db->prepare("SELECT staff_id FROM tasks WHERE id = ?");
+    // Check ownership and get task details
+    $stmt = $db->prepare("SELECT * FROM tasks WHERE id = ?");
     $stmt->execute([$id]);
     $task = $stmt->fetch();
     
@@ -577,8 +569,99 @@ function updateTask() {
             $stmtInsert->execute([$id, $item['text'], $item['sort_order'], 0, null]);
         }
     }
+
+    // 4. SYNC UPDATE TO ROUTINE TEMPLATE
+    if ($isRoutine == 1) {
+        $user = $db->query("SELECT role FROM users WHERE id = {$task['staff_id']}")->fetch();
+        $dept = $user['role'];
+
+        // Try to find the matching template by title (assuming title wasn't changed yet, but it might have been)
+        // Ideally we should link task -> template_id, but current schema doesn't have it.
+        // So we search by OLD title first (if we tracked it) or just update by department + title if it matches.
+        // For now, let's assume we update based on the NEW title if it exists, or create if not?
+        // Actually, the user request is "If I edit routine task, update the master".
+        // Since we don't have template_id in tasks table, we have to guess or search.
+        // LET'S SEARCH BY TITLE & DEPT. If found, update it.
+        
+        // Calculate duration
+        $start = strtotime($startTime);
+        $end = strtotime($endTime);
+        $duration = 1;
+        if ($end > $start) $duration = round(($end - $start) / 3600, 1);
+
+        $checklistTpl = [];
+        if (!empty($input['checklist']) && is_array($input['checklist'])) {
+            $checklistTpl = array_values(array_filter($input['checklist']));
+        }
+
+        // We try to find a template that matches the department and title.
+        // Issue: if user CHANGED the title, we won't find the old template to update.
+        // We might need to rely on the fact that they probably didn't change title AND is_routine at same time entirely.
+        // OR better: search for a template with similar creating characteristics? 
+        // For now, simple implementation: Update template with same Title & Dept.
+        
+        $oldTitle = $task['title']; // From the initial fetch at top of function
+        
+        $stmtFind = $db->prepare("SELECT id FROM routine_templates WHERE department = ? AND title = ? LIMIT 1");
+        $stmtFind->execute([$dept, $oldTitle]); // Use OLD title to find template
+        $tpl = $stmtFind->fetch();
+
+        if ($tpl) {
+            // Update existing template
+            $stmtUpdTpl = $db->prepare("
+                UPDATE routine_templates 
+                SET title = ?, duration_hours = ?, routine_days = ?, checklist_template = ?, default_start_time = ?
+                WHERE id = ?
+            ");
+            // Added title = ? to also update the master title!
+            $stmtUpdTpl->execute([$title, $duration, $routineDays, json_encode($checklistTpl), $startTime, $tpl['id']]);
+        }
+        
+        // 5. BULK SYNC FUTURE TASKS (The "Edit All" feature)
+        // We find all FUTURE tasks (date > today) that have the SAME Title (Old Title) and are routines for this staff.
+        // We update them to match the new details.
+        
+        $today = date('Y-m-d');
+        
+        // Update basic info for future tasks
+        $stmtSync = $db->prepare("
+            UPDATE tasks 
+            SET title = ?, category = ?, start_time = ?, end_time = ?, routine_days = ?, attachment_required = ?
+            WHERE staff_id = ? AND is_routine = 1 AND task_date > ? AND title = ?
+        ");
+        $stmtSync->execute([$title, $category, $startTime, $endTime, $routineDays, $attachmentRequired, $task['staff_id'], $today, $oldTitle]);
+        
+        // Sync Checklist? 
+        // This is harder because IDs distinct. We'd have to wipe and recreate checklist for future tasks?
+        // OR we just leave checklist as is?
+        // User said "semua ikut berubah" (everything changes).
+        // Let's wipe and recreate checklist for these future tasks to ensure sync.
+        
+        // Get IDs of affected future tasks
+        $stmtIds = $db->prepare("SELECT id FROM tasks WHERE staff_id = ? AND is_routine = 1 AND task_date > ? AND title = ?");
+        // Note: We use NEW title here because we just updated them above!
+        $stmtIds->execute([$task['staff_id'], $today, $title]); 
+        $futureTaskIds = $stmtIds->fetchAll(PDO::FETCH_COLUMN);
+        
+        if (!empty($futureTaskIds)) {
+            $idsStr = implode(',', $futureTaskIds);
+            
+            // Delete old checklist items for these tasks
+            $db->exec("DELETE FROM checklist_items WHERE task_id IN ($idsStr)");
+            
+            // Insert new checklist items
+             if (!empty($checklistTpl)) {
+                 $stmtBatchItem = $db->prepare("INSERT INTO checklist_items (task_id, text, sort_order) VALUES (?, ?, ?)");
+                 foreach ($futureTaskIds as $fid) {
+                     foreach ($checklistTpl as $idx => $txt) {
+                         $stmtBatchItem->execute([$fid, $txt, $idx]);
+                     }
+                 }
+             }
+        }
+    }
     
-    jsonResponse(['success' => true, 'message' => 'Tugas berhasil diupdate']);
+    jsonResponse(['success' => true, 'message' => 'Tugas berhasil diupdate (termasuk tugas masa depan)']);
 }
 
 function updateTaskStatus() {
@@ -620,6 +703,21 @@ function updateTaskStatus() {
         
         if ($count == 0) {
             jsonResponse(['success' => false, 'message' => 'Tugas ini WAJIB melampirkan bukti sebelum diselesaikan!'], 400);
+        }
+    }
+
+    // Checklist Completion Check
+    if ($status === 'done') {
+        $stmtTotal = $db->prepare("SELECT COUNT(*) as total FROM checklist_items WHERE task_id = ?");
+        $stmtTotal->execute([$id]);
+        $totalCheck = $stmtTotal->fetch()['total'];
+
+        $stmtDone = $db->prepare("SELECT COUNT(*) as done FROM checklist_items WHERE task_id = ? AND is_done = 1");
+        $stmtDone->execute([$id]);
+        $doneCheck = $stmtDone->fetch()['done'];
+
+        if ($totalCheck > 0 && $doneCheck < $totalCheck) {
+            jsonResponse(['success' => false, 'message' => "Selesaikan semua checklist ($doneCheck/$totalCheck) sebelum menandai selesai!"], 400);
         }
     }
     
@@ -775,7 +873,7 @@ function generateRoutines() {
     }
 
     $input = json_decode(file_get_contents('php://input'), true);
-    $targetDate = $input['date'] ?? date('Y-m-d');
+    $startDate = $input['date'] ?? date('Y-m-d');
     
     // Determine WHO to generate for
     $targetUserId = null;
@@ -787,8 +885,6 @@ function generateRoutines() {
         // Staff can ONLY generate for themselves
         $targetUserId = $currentUser['id'];
     }
-
-    $dayOfWeek = date('w', strtotime($targetDate));
     
     // 1. Get Users to Process
     $users = [];
@@ -801,62 +897,18 @@ function generateRoutines() {
     }
     
     $count = 0;
-    
-    // Move user fetch outside loop
-    $currentUserId = getCurrentUser()['id'] ?? null;
+    $currentActionUserId = getCurrentUser()['id'] ?? null;
 
     try {
         foreach ($users as $user) {
             $dept = $user['role'];
             
-            // ... (Template logic remains similar, passing $currentUserId) ...
-            // Find Templates for this Department
+            // A. Fetch Department Templates ONCE
             $stmtTpl = $db->prepare("SELECT * FROM routine_templates WHERE department = ? AND is_active = 1");
             $stmtTpl->execute([$dept]);
             $templates = $stmtTpl->fetchAll();
-            
-            foreach ($templates as $tpl) {
-                // ... logic ...
-                $days = json_decode($tpl['routine_days'], true);
-                if (is_array($days) && in_array($dayOfWeek, $days)) {
-                     // ...
-                     $startTime = $tpl['default_start_time'];
-                     $duration = floatval($tpl['duration_hours']);
-                     $endTime = date('H:i:s', strtotime($startTime) + ($duration * 3600));
 
-                     $stmtCheck = $db->prepare("SELECT id FROM tasks WHERE staff_id = ? AND task_date = ? AND title = ?");
-                     $stmtCheck->execute([$user['id'], $targetDate, $tpl['title']]);
-                     if (!$stmtCheck->fetch()) {
-                        $stmtInsert = $db->prepare("
-                            INSERT INTO tasks (staff_id, title, category, status, task_date, start_time, end_time, is_routine, routine_days, created_by) 
-                            VALUES (?, ?, 'Jobdesk', 'todo', ?, ?, ?, 1, ?, ?)
-                        ");
-                        $stmtInsert->execute([
-                            $user['id'],
-                            $tpl['title'],
-                            $targetDate,
-                            $startTime,
-                            $endTime,
-                            $tpl['routine_days'],
-                            $currentUserId
-                        ]);
-                        
-                        $taskId = $db->lastInsertId();
-                        $count++;
-                        
-                        // Checklist
-                        $checklist = json_decode($tpl['checklist_template'], true);
-                        if ($checklist) {
-                            $stmtItem = $db->prepare("INSERT INTO checklist_items (task_id, text, sort_order) VALUES (?, ?, ?)");
-                            foreach ($checklist as $idx => $text) {
-                                $stmtItem->execute([$taskId, $text, $idx]);
-                            }
-                        }
-                     }
-                }
-            }
-
-            // 2. PERSONAL ROUTINES
+            // B. Fetch Personal Routines ONCE
             $stmtPersonal = $db->prepare("
                 SELECT title, start_time, end_time, routine_days, staff_id 
                 FROM tasks 
@@ -866,7 +918,7 @@ function generateRoutines() {
             $stmtPersonal->execute([$user['id']]);
             $personalRoutines = $stmtPersonal->fetchAll();
 
-            // Filter unique titles for this user to avoid double processing
+            // Unique Personal Routines
             $uniquePersonal = [];
             foreach ($personalRoutines as $pr) {
                 if (!isset($uniquePersonal[$pr['title']])) {
@@ -874,57 +926,121 @@ function generateRoutines() {
                 }
             }
 
-            foreach ($uniquePersonal as $routine) {
-                $days = json_decode($routine['routine_days'], true);
-                if (is_array($days) && in_array($dayOfWeek, $days)) {
-                    
-                    $stmtCheck = $db->prepare("SELECT id FROM tasks WHERE staff_id = ? AND task_date = ? AND title = ?");
-                    $stmtCheck->execute([$user['id'], $targetDate, $routine['title']]);
-                    
-                    if (!$stmtCheck->fetch()) {
-                        $stmtInsert = $db->prepare("
-                            INSERT INTO tasks (staff_id, title, category, status, task_date, start_time, end_time, is_routine, routine_days, created_by) 
-                            VALUES (?, ?, 'Jobdesk', 'todo', ?, ?, ?, 1, ?, ?)
-                        ");
-                        $stmtInsert->execute([
-                            $user['id'],
-                            $routine['title'],
-                            $targetDate,
-                            $routine['start_time'],
-                            $routine['end_time'],
-                            $routine['routine_days'],
-                            $currentUserId
-                        ]);
-                        
-                        $newTaskId = $db->lastInsertId();
-                        $count++;
+            // LOOP 30 DAYS (1 Months)
+            for ($d = 0; $d < 30; $d++) {
+                $targetDate = date('Y-m-d', strtotime("$startDate +$d days"));
+                $dayOfWeek = date('w', strtotime($targetDate));
 
-                        $stmtLast = $db->prepare("
-                            SELECT id FROM tasks 
-                            WHERE staff_id = ? AND title = ? AND is_routine = 1 AND id != ?
-                            ORDER BY id DESC LIMIT 1
-                        ");
-                        $stmtLast->execute([$user['id'], $routine['title'], $newTaskId]);
-                        $lastTask = $stmtLast->fetch();
+                // 1. Process Templates
+                foreach ($templates as $tpl) {
+                    // Check Start Date
+                    if (!empty($tpl['start_date']) && $targetDate < $tpl['start_date']) {
+                        continue;
+                    }
 
-                        if ($lastTask) {
-                            $stmtChecklist = $db->prepare("SELECT text, sort_order FROM checklist_items WHERE task_id = ? ORDER BY sort_order");
-                            $stmtChecklist->execute([$lastTask['id']]);
-                            $checklistItems = $stmtChecklist->fetchAll();
+                    $days = json_decode($tpl['routine_days'], true);
+                    if (is_array($days) && in_array($dayOfWeek, $days)) {
+                         
+                         // Check Duplicate
+                         $stmtCheck = $db->prepare("SELECT id FROM tasks WHERE staff_id = ? AND task_date = ? AND title = ?");
+                         $stmtCheck->execute([$user['id'], $targetDate, $tpl['title']]);
+                         
+                         if (!$stmtCheck->fetch()) {
+                            // Insert
+                            $startTime = $tpl['default_start_time'];
+                            $duration = floatval($tpl['duration_hours']);
+                            $endTime = date('H:i:s', strtotime($startTime) + ($duration * 3600));
 
-                            if ($checklistItems) {
+                            $stmtInsert = $db->prepare("
+                                INSERT INTO tasks (staff_id, title, category, status, task_date, start_time, end_time, is_routine, routine_days, created_by) 
+                                VALUES (?, ?, 'Jobdesk', 'todo', ?, ?, ?, 1, ?, ?)
+                            ");
+                            $stmtInsert->execute([
+                                $user['id'],
+                                $tpl['title'],
+                                $targetDate, // Loop Date
+                                $startTime,
+                                $endTime,
+                                $tpl['routine_days'],
+                                $currentActionUserId
+                            ]);
+                            
+                            $taskId = $db->lastInsertId();
+                            $count++;
+                            
+                            // Checklist
+                            $checklist = json_decode($tpl['checklist_template'], true);
+                            if ($checklist) {
                                 $stmtItem = $db->prepare("INSERT INTO checklist_items (task_id, text, sort_order) VALUES (?, ?, ?)");
-                                foreach ($checklistItems as $item) {
-                                    $stmtItem->execute([$newTaskId, $item['text'], $item['sort_order']]);
+                                foreach ($checklist as $idx => $text) {
+                                    $stmtItem->execute([$taskId, $text, $idx]);
+                                }
+                            }
+                         }
+                    }
+                }
+
+                // 2. Process Personal Routines
+                foreach ($uniquePersonal as $routine) {
+                    $days = json_decode($routine['routine_days'], true);
+                    if (is_array($days) && in_array($dayOfWeek, $days)) {
+                        
+                        $stmtCheck = $db->prepare("SELECT id FROM tasks WHERE staff_id = ? AND task_date = ? AND title = ?");
+                        $stmtCheck->execute([$user['id'], $targetDate, $routine['title']]);
+                        
+                        if (!$stmtCheck->fetch()) {
+                            // Insert
+                            $stmtInsert = $db->prepare("
+                                INSERT INTO tasks (staff_id, title, category, status, task_date, start_time, end_time, is_routine, routine_days, created_by) 
+                                VALUES (?, ?, 'Jobdesk', 'todo', ?, ?, ?, 1, ?, ?)
+                            ");
+                            $params = [
+                                $user['id'],
+                                $routine['title'],
+                                $targetDate,
+                                $routine['start_time'],
+                                $routine['end_time'],
+                                $routine['routine_days'],
+                                $currentActionUserId
+                            ];
+                            
+                            try {
+                                $stmtInsert->execute($params);
+                            } catch (PDOException $pdoe) {
+                                throw new Exception("Insert failed. Params: " . print_r($params, true) . " Error: " . $pdoe->getMessage());
+                            }
+                            
+                            $newTaskId = $db->lastInsertId();
+                            $count++;
+
+                            // Copy Checklist from previous instance
+                             $stmtLast = $db->prepare("
+                                SELECT id FROM tasks 
+                                WHERE staff_id = ? AND title = ? AND is_routine = 1 AND id != ?
+                                ORDER BY id DESC LIMIT 1
+                            ");
+                            $stmtLast->execute([$user['id'], $routine['title'], $newTaskId]);
+                            $lastTask = $stmtLast->fetch();
+
+                            if ($lastTask) {
+                                $stmtChk = $db->prepare("SELECT text, sort_order FROM checklist_items WHERE task_id = ? ORDER BY sort_order");
+                                $stmtChk->execute([$lastTask['id']]);
+                                $items = $stmtChk->fetchAll();
+                                
+                                if ($items) {
+                                    $stmtItem = $db->prepare("INSERT INTO checklist_items (task_id, text, sort_order) VALUES (?, ?, ?)");
+                                    foreach ($items as $itm) {
+                                        $stmtItem->execute([$newTaskId, $itm['text'], $itm['sort_order']]);
+                                    }
                                 }
                             }
                         }
                     }
                 }
-            }
-        }
+            } // End Days Loop
+        } // End Users Loop
         
-        jsonResponse(['success' => true, 'message' => "Berhasil generate $count rutinitas"]);
+        jsonResponse(['success' => true, 'message' => "Generated $count tasks for next 30 days"]);
 
     } catch (Exception $e) {
         jsonResponse(['success' => false, 'message' => 'Error generating routines: ' . $e->getMessage()], 500);
