@@ -1,4 +1,4 @@
-﻿/* =====================================================
+/* =====================================================
    OfficeSync - Staff Timeline Management System
    Modern Premium CSS Design
 ===================================================== */
@@ -2793,6 +2793,8 @@ body {
         height: calc(100vh - 60px - 72px);
         /* 60px header + 72px bottom nav */
         overflow: hidden;
+        display: flex;
+        flex-direction: column;
     }
 
     /* ================= Page Controls (Toggle & Date) ================= */
@@ -3003,6 +3005,15 @@ body {
     .timeline-header {
         display: none;
     }
+
+    /* Ensure timeline-container uses all available space */
+    .timeline-container {
+        flex: 1;
+        min-height: 0;
+        height: 100%;
+        display: flex;
+        flex-direction: column;
+    }
 }
 
 /* =====================================================
@@ -3019,6 +3030,8 @@ body {
     border-radius: var(--radius-xl);
     overflow: hidden;
     border: 1px solid var(--slate-200);
+    height: 100%;
+    max-height: 100%;
 }
 
 /* --- Header Section --- */
@@ -3127,6 +3140,8 @@ body {
     display: flex;
     padding-top: 25px;
     /* Add space above 08:00 without showing 07:00 */
+    min-height: 0;
+    height: 100%;
 }
 
 /* Time Sidebar */
@@ -4617,6 +4632,6 @@ body {
     }
 
     .main-content {
-        padding-bottom: calc(90px + env(safe-area-inset-bottom));
+        padding-bottom: calc(var(--space-2) + env(safe-area-inset-bottom));
     }
 }

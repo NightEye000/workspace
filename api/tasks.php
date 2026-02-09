@@ -149,6 +149,70 @@ function getTasks() {
     $userIds = array_column($users, 'id');
     $inQuery = implode(',', array_fill(0, count($userIds), '?'));
     
+    // Lazy-create routine instances for this date so routines appear every selected day
+    $dayOfWeek = (int) date('w', strtotime($singleDate));
+    foreach ($userIds as $userId) {
+        $stmtRoutines = $db->prepare("
+            SELECT id, title, start_time, end_time, routine_days, created_by 
+            FROM tasks 
+            WHERE staff_id = ? AND is_routine = 1 
+            ORDER BY id DESC
+        ");
+        $stmtRoutines->execute([$userId]);
+        $personalRoutines = $stmtRoutines->fetchAll();
+        $uniqueByTitle = [];
+        foreach ($personalRoutines as $row) {
+            if (!isset($uniqueByTitle[$row['title']])) {
+                $uniqueByTitle[$row['title']] = $row;
+            }
+        }
+        foreach ($uniqueByTitle as $routine) {
+            $days = json_decode($routine['routine_days'], true);
+            if (!is_array($days) || !in_array($dayOfWeek, $days)) {
+                continue;
+            }
+            $stmtExists = $db->prepare("SELECT id FROM tasks WHERE staff_id = ? AND task_date = ? AND title = ?");
+            $stmtExists->execute([$userId, $singleDate, $routine['title']]);
+            if ($stmtExists->fetch()) {
+                continue;
+            }
+            $createdBy = isset($routine['created_by']) && $routine['created_by'] !== null
+                ? $routine['created_by'] : $userId;
+            $stmtInsert = $db->prepare("
+                INSERT INTO tasks (staff_id, title, category, status, task_date, start_time, end_time, is_routine, routine_days, created_by)
+                VALUES (?, ?, 'Jobdesk', 'todo', ?, ?, ?, 1, ?, ?)
+            ");
+            $stmtInsert->execute([
+                $userId,
+                $routine['title'],
+                $singleDate,
+                $routine['start_time'],
+                $routine['end_time'],
+                $routine['routine_days'],
+                $createdBy
+            ]);
+            $newTaskId = $db->lastInsertId();
+            $stmtLast = $db->prepare("
+                SELECT id FROM tasks 
+                WHERE staff_id = ? AND title = ? AND is_routine = 1 AND id != ?
+                ORDER BY id DESC LIMIT 1
+            ");
+            $stmtLast->execute([$userId, $routine['title'], $newTaskId]);
+            $lastTask = $stmtLast->fetch();
+            if ($lastTask) {
+                $stmtChk = $db->prepare("SELECT text, sort_order FROM checklist_items WHERE task_id = ? ORDER BY sort_order");
+                $stmtChk->execute([$lastTask['id']]);
+                $checklistItems = $stmtChk->fetchAll();
+                if ($checklistItems) {
+                    $stmtItem = $db->prepare("INSERT INTO checklist_items (task_id, text, sort_order) VALUES (?, ?, ?)");
+                    foreach ($checklistItems as $item) {
+                        $stmtItem->execute([$newTaskId, $item['text'], $item['sort_order']]);
+                    }
+                }
+            }
+        }
+    }
+    
     // Direct JOIN instead of View to ensure fresh status
     $taskSql = "
         SELECT t.*, u.name as staff_name, u.avatar as staff_avatar, u.role as staff_role

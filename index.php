@@ -92,12 +92,6 @@
                         <span>Users</span>
                     </button>
                     
-                    <!-- Generate Routines (Admin) -->
-                    <button id="btn-generate-routines" class="btn btn-purple hidden">
-                        <i data-lucide="refresh-cw"></i>
-                        <span>Rutinitas</span>
-                    </button>
-                    
                     <!-- Add Work (Staff) -->
                     <button id="btn-add-work" class="btn btn-primary">
                         <i data-lucide="plus-circle"></i>
@@ -276,10 +270,6 @@
                      <button id="mobile-btn-users" class="drawer-link hidden">
                          <i data-lucide="users"></i> Management Users
                      </button>
-                     <button id="mobile-btn-routines" class="drawer-link hidden">
-                         <i data-lucide="refresh-cw"></i> Generate Rutinitas
-                     </button>
-                     
                      <div class="drawer-divider"></div>
                      
                      <button id="mobile-btn-logout" class="drawer-link text-danger">
