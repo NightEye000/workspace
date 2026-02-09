@@ -460,16 +460,57 @@ function updateTask() {
     $stmt = $db->prepare($sql);
     $stmt->execute([$title, $category, $startTime, $endTime, $isRoutine, $routineDays, $attachmentRequired, $id]);
     
-    // Update Checklist (Delete all and re-insert is simplest for this scale)
-    $db->prepare("DELETE FROM checklist_items WHERE task_id = ?")->execute([$id]);
+    // Update Checklist - Smart update to preserve progress
+    // Get existing checklist items with their state
+    $stmtExisting = $db->prepare("SELECT id, text, is_done, completed_at FROM checklist_items WHERE task_id = ? ORDER BY sort_order");
+    $stmtExisting->execute([$id]);
+    $existingItems = $stmtExisting->fetchAll();
     
+    // Create a map of existing items by text for quick lookup
+    $existingMap = [];
+    foreach ($existingItems as $item) {
+        $existingMap[$item['text']] = $item;
+    }
+    
+    // Get new checklist items from input
+    $newItems = [];
     if (!empty($input['checklist']) && is_array($input['checklist'])) {
-        $stmtItem = $db->prepare("INSERT INTO checklist_items (task_id, text, sort_order) VALUES (?, ?, ?)");
         foreach ($input['checklist'] as $index => $itemText) {
             $itemText = sanitize($itemText);
             if (!empty($itemText)) {
-                $stmtItem->execute([$id, $itemText, $index]);
+                $newItems[] = ['text' => $itemText, 'sort_order' => $index];
             }
+        }
+    }
+    
+    // Determine items to delete (no longer in new list)
+    $newTexts = array_column($newItems, 'text');
+    $existingIds = array_column($existingItems, 'id');
+    $idsToDelete = [];
+    
+    foreach ($existingItems as $item) {
+        if (!in_array($item['text'], $newTexts)) {
+            $idsToDelete[] = $item['id'];
+        }
+    }
+    
+    // Delete removed items
+    if (!empty($idsToDelete)) {
+        $placeholders = implode(',', array_fill(0, count($idsToDelete), '?'));
+        $db->prepare("DELETE FROM checklist_items WHERE id IN ($placeholders)")->execute($idsToDelete);
+    }
+    
+    // Insert or update items
+    $stmtInsert = $db->prepare("INSERT INTO checklist_items (task_id, text, sort_order, is_done, completed_at) VALUES (?, ?, ?, ?, ?)");
+    $stmtUpdate = $db->prepare("UPDATE checklist_items SET sort_order = ? WHERE id = ?");
+    
+    foreach ($newItems as $item) {
+        if (isset($existingMap[$item['text']])) {
+            // Item exists - just update sort order, preserve is_done and completed_at
+            $stmtUpdate->execute([$item['sort_order'], $existingMap[$item['text']]['id']]);
+        } else {
+            // New item - insert with default state
+            $stmtInsert->execute([$id, $item['text'], $item['sort_order'], 0, null]);
         }
     }
     
@@ -544,6 +585,11 @@ function deleteTask() {
     
     $input = json_decode(file_get_contents('php://input'), true);
     $id = $input['id'] ?? null;
+    
+    // Validate ID exists
+    if (!$id) {
+        jsonResponse(['success' => false, 'message' => 'Task ID required'], 400);
+    }
     
     // Check ownership
     $stmt = $db->prepare("SELECT staff_id FROM tasks WHERE id = ?");

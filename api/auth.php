@@ -143,8 +143,8 @@ function updatePassword() {
         jsonResponse(['success' => false, 'message' => 'Password lama dan baru harus diisi'], 400);
     }
     
-    if (strlen($newPassword) < 4) {
-        jsonResponse(['success' => false, 'message' => 'Password minimal 4 karakter'], 400);
+    if (strlen($newPassword) < 6) {
+        jsonResponse(['success' => false, 'message' => 'Password minimal 6 karakter'], 400);
     }
     
     $db = getDB();

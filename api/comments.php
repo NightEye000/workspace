@@ -47,6 +47,20 @@ function addComment() {
     $db = getDB();
     $currentUser = getCurrentUser();
     
+    // Validate task ownership - user can only comment on their own tasks or if admin
+    $stmt = $db->prepare("SELECT staff_id FROM tasks WHERE id = ?");
+    $stmt->execute([$taskId]);
+    $task = $stmt->fetch();
+    
+    if (!$task) {
+        jsonResponse(['success' => false, 'message' => 'Task not found'], 404);
+    }
+    
+    // Allow if: user owns task, user is admin, or task was assigned to user (via staff_id)
+    if ($task['staff_id'] != $currentUser['id'] && !isAdmin()) {
+        jsonResponse(['success' => false, 'message' => 'Anda tidak memiliki akses ke tugas ini'], 403);
+    }
+    
     $stmt = $db->prepare("INSERT INTO comments (task_id, user_id, text) VALUES (?, ?, ?)");
     $stmt->execute([$taskId, $currentUser['id'], $text]);
     
@@ -134,6 +148,20 @@ function addAttachment() {
     }
     
     $db = getDB();
+    $currentUser = getCurrentUser();
+    
+    // Validate task ownership - user can only add attachment to their own tasks or if admin
+    $stmt = $db->prepare("SELECT staff_id FROM tasks WHERE id = ?");
+    $stmt->execute([$taskId]);
+    $task = $stmt->fetch();
+    
+    if (!$task) {
+        jsonResponse(['success' => false, 'message' => 'Task not found'], 404);
+    }
+    
+    if ($task['staff_id'] != $currentUser['id'] && !isAdmin()) {
+        jsonResponse(['success' => false, 'message' => 'Anda tidak memiliki akses ke tugas ini'], 403);
+    }
     
     $stmt = $db->prepare("INSERT INTO attachments (task_id, name, url, type) VALUES (?, ?, ?, ?)");
     $stmt->execute([$taskId, $name, $url, $type]);
