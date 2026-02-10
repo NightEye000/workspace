@@ -104,6 +104,11 @@
                         <span>Request</span>
                     </button>
                     
+                    <!-- Profile -->
+                    <button id="btn-profile" class="icon-btn" title="Edit Profile">
+                        <i data-lucide="user-cog"></i>
+                    </button>
+                    
                     <!-- Logout -->
                     <button id="btn-logout" class="icon-btn" title="Logout">
                         <i data-lucide="log-out"></i>
@@ -142,6 +147,12 @@
                     </div>
                 </div>
                 <div class="page-header-right">
+                    <!-- Generate Routine Button (Global) -->
+                    <button id="btn-generate-routine" class="btn btn-outline btn-sm" onclick="App.generateRoutines()" title="Generate Rutinitas 30 Hari" style="margin-right:8px;">
+                        <i data-lucide="refresh-cw"></i>
+                        <span class="hidden-mobile">Generate Rutinitas</span>
+                    </button>
+                    
                     <i data-lucide="filter"></i>
                     <select id="dept-filter">
                         <option value="All">Semua Divisi</option>
@@ -262,6 +273,9 @@
                      <div class="user-details">
                          <strong id="drawer-username">User</strong>
                          <span id="drawer-role">Role</span>
+                         <button id="mobile-btn-profile" class="btn btn-xs btn-outline" style="margin-top:4px;">
+                            <i data-lucide="user-cog" style="width:12px;height:12px;"></i> Edit Profil
+                         </button>
                      </div>
                  </div>
                  
@@ -580,6 +594,11 @@
         </div>
         <div class="modal-body">
             <form id="form-user">
+                <div style="text-align: center; margin-bottom: 1.5rem;">
+                    <img id="user-avatar-preview" src="assets/images/Group 1.png" alt="Avatar Preview" 
+                        style="width: 80px; height: 80px; border-radius: 50%; object-fit: cover; border: 3px solid white; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1); background: #f1f5f9;">
+                    <p style="font-size: 0.75rem; color: #64748b; margin-top: 0.5rem;">Avatar Otomatis (Live Preview)</p>
+                </div>
                 <input type="hidden" id="user-id">
                 <div class="form-group">
                     <label>Username</label>
@@ -598,6 +617,13 @@
                     <select id="user-role" required>
                         <option value="">Pilih Role...</option>
                         <option value="Admin">Admin</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Jenis Kelamin</label>
+                    <select id="user-gender" required>
+                        <option value="Laki-laki">Laki-laki</option>
+                        <option value="Perempuan">Perempuan</option>
                     </select>
                 </div>
                 <button type="submit" class="btn btn-primary btn-block">Simpan User</button>
@@ -632,8 +658,8 @@
     <!-- Custom Confirm Modal -->
     <div id="modal-confirm" class="modal hidden" style="max-width:320px;">
         <div class="modal-body text-center" style="padding: 24px;">
-            <div style="background:#fee2e2; width:48px; height:48px; border-radius:50%; margin:0 auto 16px; display:flex; align-items:center; justify-content:center; color:#ef4444;">
-                <i data-lucide="alert-triangle"></i>
+            <div id="confirm-icon-bg" style="background:#fee2e2; width:48px; height:48px; border-radius:50%; margin:0 auto 16px; display:flex; align-items:center; justify-content:center; color:#ef4444;">
+                <i id="confirm-icon" data-lucide="alert-triangle"></i>
             </div>
             <h3 id="confirm-title" style="font-size:1.1rem; font-weight:700; color:#1e293b; margin-bottom:8px;">Konfirmasi</h3>
             <p id="confirm-msg" style="color:#64748b; font-size:0.9rem; margin-bottom:24px;">Yakin ingin melakukan ini?</p>
@@ -660,6 +686,53 @@
             <p id="notif-denied-msg" class="hidden" style="color: #ef4444; margin-top: 1rem; font-size: 0.875rem;">
                 Notifikasi diblokir browser. Mohon izinkan via pengaturan browser (icon (i) di URL bar) Pojok Kiri.
             </p>
+        </div>
+    </div>
+
+    <!-- Profile Edit Modal -->
+    <div id="modal-profile" class="modal hidden">
+        <div class="modal-header">
+            <h3>Edit Profil Saya</h3>
+            <button class="modal-close" data-modal="modal-profile">
+                <i data-lucide="x"></i>
+            </button>
+        </div>
+        <div class="modal-body">
+            <form id="form-profile">
+                <!-- Avatar Upload Section -->
+                <div class="form-group text-center">
+                    <div class="avatar-upload-preview" onclick="document.getElementById('profile-avatar-input').click()">
+                        <img id="profile-avatar-preview" src="" alt="Profile Preview">
+                        <div class="avatar-overlay">
+                            <i data-lucide="camera"></i>
+                            <span>Ubah Foto</span>
+                        </div>
+                    </div>
+                    <input type="file" id="profile-avatar-input" accept="image/*" hidden>
+                </div>
+
+                <div class="form-group">
+                    <label>Nama Lengkap</label>
+                    <input type="text" id="profile-name" required>
+                </div>
+                <div class="form-group">
+                    <label>Username</label>
+                    <input type="text" id="profile-username" required>
+                    <small class="text-muted">Username digunakan untuk login. Harus unik.</small>
+                </div>
+                <div class="divider"></div>
+                <div class="form-group">
+                    <label>Password Baru <span class="text-muted">(Opsional)</span></label>
+                    <input type="password" id="profile-password" placeholder="Kosongkan jika tidak ubah">
+                </div>
+                <div class="form-group">
+                    <label>Konfirmasi Password</label>
+                    <input type="password" id="profile-password-confirm" placeholder="Ulangi password baru">
+                </div>
+                <button type="submit" class="btn btn-primary btn-block">
+                    <i data-lucide="save"></i> Simpan Perubahan
+                </button>
+            </form>
         </div>
     </div>
 

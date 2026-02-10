@@ -73,8 +73,28 @@ function verifyPassword($password, $hash) {
 /**
  * Generate Avatar URL
  */
-function generateAvatar($seed) {
-    return "https://api.dicebear.com/7.x/avataaars/svg?seed=" . urlencode($seed);
+/**
+ * Generate Avatar URL
+ * @param string $seed Name seed
+ * @param string $gender 'Laki-laki' or 'Perempuan'
+ */
+function generateAvatar($seed, $gender = 'Laki-laki') {
+    // Local Avatar Logic (Group 1-6)
+    // Male (Laki-laki) -> Odd (1, 3, 5)
+    // Female (Perempuan) -> Even (2, 4, 6)
+    
+    if ($gender === 'Perempuan') {
+        $options = [2, 4, 6];
+    } else {
+        $options = [1, 3, 5];
+    }
+    
+    // Pick random index
+    $randIndex = array_rand($options);
+    $num = $options[$randIndex];
+    
+    // Return relative path from web root
+    return 'assets/images/Group ' . $num . '.png';
 }
 
 /**
@@ -249,6 +269,71 @@ function createNotification($userId, $title, $message, $type = 'info', $taskId =
     $stmt = $db->prepare("INSERT INTO notifications (user_id, title, message, type, task_id) VALUES (?, ?, ?, ?, ?)");
     $stmt->execute([$userId, $title, $message, $type, $taskId]);
     return $db->lastInsertId();
+}
+
+/**
+ * Handle File Upload
+ * @param array $file $_FILES['input_name']
+ * @param string $subDir Subdirectory in uploads folder
+ * @return string Relative path to file (e.g., helpers/../uploads/filename.jpg)
+ * @throws Exception
+ */
+function handleFileUpload($file, $subDir = '') {
+    // Config - Adjusted to point to root/uploads
+    $uploadDir = __DIR__ . '/../uploads/';
+    
+    // Allowed MIME types
+    $allowedTypes = [
+        'image/jpeg', 
+        'image/png', 
+        'image/gif', 
+        'image/webp'
+    ];
+    
+    // Max size 2MB
+    $maxSize = 2 * 1024 * 1024; 
+
+    // Error check
+    if ($file['error'] !== UPLOAD_ERR_OK) {
+        throw new Exception('Upload failed with error code: ' . $file['error']);
+    }
+
+    // Type check
+    $finfo = new finfo(FILEINFO_MIME_TYPE);
+    $mimeType = $finfo->file($file['tmp_name']);
+    
+    if (!in_array($mimeType, $allowedTypes)) {
+        throw new Exception('Hanya file gambar yang diperbolehkan (JPG, PNG, GIF, WEBP)');
+    }
+
+    // Size check
+    if ($file['size'] > $maxSize) {
+        throw new Exception('Ukuran file maksimal 2MB');
+    }
+
+    // Prepare Directory
+    $targetDir = $uploadDir . ($subDir ? $subDir . '/' : '');
+    if (!is_dir($targetDir)) {
+        if (!mkdir($targetDir, 0755, true)) {
+            throw new Exception('Gagal membuat direktori upload');
+        }
+    }
+
+    // Generate Safe Filename
+    $ext = pathinfo($file['name'], PATHINFO_EXTENSION);
+    // Sanitize extension
+    $ext = strtolower(preg_replace('/[^a-zA-Z0-9]/', '', $ext));
+    
+    $filename = uniqid('img_', true) . '.' . $ext;
+    $targetFile = $targetDir . $filename;
+
+    // Move File
+    if (!move_uploaded_file($file['tmp_name'], $targetFile)) {
+        throw new Exception('Gagal menyimpan file');
+    }
+
+    // Return relative URL path
+    return 'uploads/' . ($subDir ? $subDir . '/' : '') . $filename;
 }
 
 

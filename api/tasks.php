@@ -1040,7 +1040,14 @@ function generateRoutines() {
             } // End Days Loop
         } // End Users Loop
         
-        jsonResponse(['success' => true, 'message' => "Generated $count tasks for next 30 days"]);
+        if ($count > 0) {
+            jsonResponse(['success' => true, 'message' => "Berhasil: $count tugas rutinitas baru telah dibuat."]);
+        } else {
+            // Check if we actually found templates but they were all duplicates
+            // For now, if 0 created, we assume they were largely existing or no templates
+            // Let's refine this by just saying "Data already up to date"
+            jsonResponse(['success' => false, 'message' => "Gagal: Rutinitas untuk 30 hari ke depan sudah ada. Tidak ada data baru yang ditambahkan."]);
+        }
 
     } catch (Exception $e) {
         jsonResponse(['success' => false, 'message' => 'Error generating routines: ' . $e->getMessage()], 500);

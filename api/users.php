@@ -60,7 +60,7 @@ function getUsers() {
     $department = $_GET['department'] ?? '';
     $excludeAdmin = isset($_GET['exclude_admin']) && $_GET['exclude_admin'] === 'true';
     
-    $sql = "SELECT id, username, name, role, avatar, is_active, created_at FROM users WHERE 1=1";
+    $sql = "SELECT id, username, name, role, gender, avatar, is_active, created_at FROM users WHERE 1=1";
     $params = [];
     
     if ($excludeAdmin) {
@@ -94,7 +94,7 @@ function getUser() {
     }
     
     $db = getDB();
-    $stmt = $db->prepare("SELECT id, username, name, role, avatar, is_active, created_at FROM users WHERE id = ?");
+    $stmt = $db->prepare("SELECT id, username, name, role, gender, avatar, is_active, created_at FROM users WHERE id = ?");
     $stmt->execute([$id]);
     $user = $stmt->fetch();
     
@@ -123,6 +123,7 @@ function createUser() {
     $password = $input['password'] ?? '';
     $name = sanitize($input['name'] ?? '');
     $role = sanitize($input['role'] ?? '');
+    $gender = sanitize($input['gender'] ?? 'Laki-laki');
     
     // Validation
     if (empty($username) || empty($password) || empty($name) || empty($role)) {
@@ -148,10 +149,10 @@ function createUser() {
     
     // Create user
     $hashedPassword = hashPassword($password);
-    $avatar = generateAvatar($name);
+    $avatar = generateAvatar($name, $gender);
     
-    $stmt = $db->prepare("INSERT INTO users (username, password, name, role, avatar) VALUES (?, ?, ?, ?, ?)");
-    $stmt->execute([$username, $hashedPassword, $name, $role, $avatar]);
+    $stmt = $db->prepare("INSERT INTO users (username, password, name, role, gender, avatar) VALUES (?, ?, ?, ?, ?, ?)");
+    $stmt->execute([$username, $hashedPassword, $name, $role, $gender, $avatar]);
     
     $newId = $db->lastInsertId();
     
@@ -167,9 +168,17 @@ function updateUser() {
         jsonResponse(['success' => false, 'message' => 'Method not allowed'], 405);
     }
     
+    // Verify CSRF Token
     verifyCSRFToken();
 
-    $input = json_decode(file_get_contents('php://input'), true);
+    // Handle Content-Type for JSON vs Multipart
+    $contentType = $_SERVER["CONTENT_TYPE"] ?? '';
+    if (strpos($contentType, 'application/json') !== false) {
+        $input = json_decode(file_get_contents('php://input'), true);
+    } else {
+        $input = $_POST;
+    }
+    
     $id = $input['id'] ?? null;
     
     if (!$id) {
@@ -186,26 +195,76 @@ function updateUser() {
     
     $name = sanitize($input['name'] ?? '');
     $role = sanitize($input['role'] ?? '');
+    $username = sanitize($input['username'] ?? ''); // Allow updating username
     $password = $input['password'] ?? '';
     
     if (empty($name)) {
         jsonResponse(['success' => false, 'message' => 'Nama wajib diisi'], 400);
     }
+
+    if (empty($username)) {
+        jsonResponse(['success' => false, 'message' => 'Username wajib diisi'], 400);
+    }
     
     $db = getDB();
+
+    // Check username uniqueness if changed
+    $stmt = $db->prepare("SELECT id FROM users WHERE username = ? AND id != ?");
+    $stmt->execute([$username, $id]);
+    if ($stmt->fetch()) {
+        jsonResponse(['success' => false, 'message' => 'Username sudah digunakan'], 400);
+    }
     
-    // Non-admin cannot change role
+    // START UPDATE QUERY BUILD
+    $sql = "UPDATE users SET name = ?, username = ?, gender = ?";
+    $gender = sanitize($input['gender'] ?? 'Laki-laki');
+    $params = [$name, $username, $gender];
+
+    // Handle Avatar Logic for Gender Change
+    // We only regenerate avatar if it looks like a default DiceBear avatar OR if Gender has changed (force update)
+    // If user uploaded a custom one (starts with 'uploads/'), we keep it UNLESS gender changed.
+    // Also, if a new file is uploaded, that takes precedence.
+    $stmt = $db->prepare("SELECT gender, avatar FROM users WHERE id = ?");
+    $stmt->execute([$id]);
+    $currentUserData = $stmt->fetch();
+    $currentGender = $currentUserData['gender'];
+    $currentAvatar = $currentUserData['avatar'];
+
+    $newAvatarPath = null;
+    
+    // 1. Check File Upload
+    if (isset($_FILES['avatar']) && $_FILES['avatar']['error'] === UPLOAD_ERR_OK) {
+        try {
+            $newAvatarPath = handleFileUpload($_FILES['avatar'], 'avatars');
+        } catch (Exception $e) {
+            jsonResponse(['success' => false, 'message' => $e->getMessage()], 400);
+        }
+    } 
+    // 2. Automatic Logic
+    else {
+        $genderChanged = ($gender !== $currentGender);
+        $isDiceBear = (strpos($currentAvatar, 'dicebear') !== false);
+        
+        // Regenerate if:
+        // - Gender changed (Must update specific gender traits)
+        // - OR It's already a DiceBear avatar (Update seed/name)
+        if ($genderChanged || $isDiceBear) {
+            $newAvatarPath = generateAvatar($name, $gender);
+        }
+    }
+
+    if ($newAvatarPath) {
+        $sql .= ", avatar = ?";
+        $params[] = $newAvatarPath;
+    }
+
     if ($isAdminUser && !empty($role)) {
         if (!in_array($role, array_merge(['Admin'], DEPARTMENTS))) {
             jsonResponse(['success' => false, 'message' => 'Role tidak valid'], 400);
         }
-        
-        $sql = "UPDATE users SET name = ?, role = ?, avatar = ?";
-        $params = [$name, $role, generateAvatar($name)];
-    } else {
-        $sql = "UPDATE users SET name = ?, avatar = ?";
-        $params = [$name, generateAvatar($name)];
-    }
+        $sql .= ", role = ?";
+        $params[] = $role;
+    } 
     
     // Password update if provided
     if (!empty($password)) {
@@ -294,4 +353,60 @@ function toggleUserStatus() {
 
 function getDepartments() {
     jsonResponse(['success' => true, 'departments' => DEPARTMENTS]);
+}
+
+// Handle Requests
+if ($_SERVER['REQUEST_METHOD'] === 'GET') {
+    if (isset($_GET['action'])) {
+        $action = $_GET['action'];
+        switch ($action) {
+            case 'get':
+                if (isset($_GET['id'])) {
+                    getUser($_GET['id']);
+                } else {
+                    getUsers();
+                }
+                break;
+            case 'departments':
+                getDepartments();
+                break;
+            default:
+                jsonResponse(['success' => false, 'message' => 'Invalid action'], 400);
+        }
+    } else {
+        // Default to get users or single user
+        if (isset($_GET['id'])) {
+            getUser($_GET['id']);
+        } else {
+            getUsers();
+        }
+    }
+} elseif ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    $input = json_decode(file_get_contents('php://input'), true);
+    // Support Multipart/Form-Data for file uploads, where input might be in $_POST
+    if (!$input && !empty($_POST)) {
+        $input = $_POST;
+    }
+    
+    // Check for explicit action in query param or body
+    $action = $_GET['action'] ?? $input['action'] ?? '';
+    
+    if ($action === 'create') {
+        createUser();
+    } elseif ($action === 'update') {
+        updateUser();
+    } elseif ($action === 'delete') {
+        deleteUser();
+    } elseif ($action === 'status') {
+        toggleUserStatus();
+    } else {
+        // Fallback based on content
+        if (isset($input['id'])) {
+            updateUser();
+        } else {
+            createUser();
+        }
+    }
+} else {
+    jsonResponse(['success' => false, 'message' => 'Method not allowed'], 405);
 }

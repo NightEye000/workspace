@@ -4643,31 +4643,39 @@ body {
 /* Container: Takes full height of parent and sets up flex column */
 #list-view-container,
 #history-view-container {
-    display: flex; /* Override existing display if any */
+    display: flex;
+    /* Override existing display if any */
     flex-direction: column;
-    height: 100%; /* Fill main-content height */
-    overflow: hidden; /* Prevent body scroll */
-    min-height: 0; /* Important for flex child scrolling */
+    height: 100%;
+    /* Fill main-content height */
+    overflow: hidden;
+    /* Prevent body scroll */
+    min-height: 0;
+    /* Important for flex child scrolling */
 }
 
 /* Header Area (Filters): Keeps its natural height */
 .list-view-filters,
 .history-view-header {
     flex-shrink: 0;
-    padding: var(--space-2) var(--space-4); /* Ensure padding */
-    background: transparent; /* Or match background */
+    padding: var(--space-2) var(--space-4);
+    /* Ensure padding */
+    background: transparent;
+    /* Or match background */
 }
 
 /* Content Area: Expands to fill remaining space and scrolls internally */
 .list-view-content,
 .history-view-content {
-    flex: 1; /* Grow to fill space */
-    overflow-y: auto; /* Enable internal scrolling */
+    flex: 1;
+    /* Grow to fill space */
+    overflow-y: auto;
+    /* Enable internal scrolling */
     padding: var(--space-4);
-    
+
     /* Smooth Scrolling */
     scroll-behavior: smooth;
-    
+
     /* Custom Scrollbar Styling */
     scrollbar-width: thin;
     scrollbar-color: var(--slate-300) transparent;
@@ -4693,4 +4701,54 @@ body {
 .list-view-content::-webkit-scrollbar-thumb:hover,
 .history-view-content::-webkit-scrollbar-thumb:hover {
     background-color: var(--slate-400);
+}
+
+/* =====================================================
+   Avatar Upload Styles
+===================================================== */
+
+.avatar-upload-preview {
+    width: 120px;
+    height: 120px;
+    border-radius: 50%;
+    overflow: hidden;
+    margin: 0 auto 16px;
+    position: relative;
+    cursor: pointer;
+    border: 3px solid var(--slate-200);
+    box-shadow: var(--shadow-md);
+    transition: var(--transition-normal);
+}
+
+.avatar-upload-preview:hover {
+    border-color: var(--primary);
+}
+
+.avatar-upload-preview img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.avatar-overlay {
+    position: absolute;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.5);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    color: white;
+    opacity: 0;
+    transition: var(--transition-fast);
+}
+
+.avatar-upload-preview:hover .avatar-overlay {
+    opacity: 1;
+}
+
+.avatar-overlay span {
+    font-size: 0.75rem;
+    font-weight: 600;
+    margin-top: 4px;
 }

@@ -16,6 +16,7 @@ CREATE TABLE IF NOT EXISTS users (
     name VARCHAR(100) NOT NULL,
     role ENUM('Admin', 'Advertiser', 'Design Grafis', 'Marketplace', 'Customer Service', 
               'Konten Video', 'Admin Order', 'HR', 'Finance', 'Gudang', 'Affiliate', 'Tech/Programmer') NOT NULL,
+    gender ENUM('Laki-laki', 'Perempuan') NOT NULL DEFAULT 'Laki-laki',
     avatar VARCHAR(255) DEFAULT NULL,
     is_active TINYINT(1) DEFAULT 1,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
