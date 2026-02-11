@@ -147,11 +147,6 @@
                     </div>
                 </div>
                 <div class="page-header-right">
-                    <!-- Generate Routine Button (Global) -->
-                    <button id="btn-generate-routine" class="btn btn-outline btn-sm" onclick="App.generateRoutines()" title="Generate Rutinitas 30 Hari" style="margin-right:8px;">
-                        <i data-lucide="refresh-cw"></i>
-                        <span class="hidden-mobile">Generate Rutinitas</span>
-                    </button>
                     
                     <i data-lucide="filter"></i>
                     <select id="dept-filter">

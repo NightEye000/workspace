@@ -7,7 +7,7 @@ CREATE DATABASE IF NOT EXISTS workspace CHARACTER SET utf8mb4 COLLATE utf8mb4_un
 USE workspace;
 
 -- =====================================================
--- 1. USERS TABLE
+-- 1. USERS TABLE (LEVEL 1 - Tidak butuh tabel lain)
 -- =====================================================
 CREATE TABLE IF NOT EXISTS users (
     id INT AUTO_INCREMENT PRIMARY KEY,
@@ -24,11 +24,31 @@ CREATE TABLE IF NOT EXISTS users (
 );
 
 -- =====================================================
--- 2. DAILY WORK (TASKS) TABLE
+-- 2. ROUTINE TEMPLATES TABLE (LEVEL 1 - Dipindah ke ATAS)
+-- =====================================================
+-- Tabel ini harus ada DULUAN sebelum Tasks
+CREATE TABLE IF NOT EXISTS routine_templates (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    department VARCHAR(100) NOT NULL,
+    title VARCHAR(255) NOT NULL,
+    duration_hours DECIMAL(3,1) DEFAULT 1.0,
+    routine_days JSON DEFAULT NULL,
+    checklist_template JSON DEFAULT NULL,
+    default_start_time TIME DEFAULT '09:00:00',
+    start_date DATE DEFAULT NULL, -- Tambahan agar kompatibel dengan logika baru
+    is_active TINYINT(1) DEFAULT 1,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX idx_department (department)
+);
+
+-- =====================================================
+-- 3. DAILY WORK (TASKS) TABLE (LEVEL 2 - Butuh Users & Templates)
 -- =====================================================
 CREATE TABLE IF NOT EXISTS tasks (
     id INT AUTO_INCREMENT PRIMARY KEY,
     staff_id INT NOT NULL,
+    routine_template_id INT DEFAULT NULL, -- PERBAIKAN: Harus boleh NULL untuk tugas manual
     title VARCHAR(255) NOT NULL,
     category ENUM('Jobdesk', 'Tugas Tambahan', 'Inisiatif', 'Request') DEFAULT 'Jobdesk',
     source_dept VARCHAR(100) DEFAULT NULL,
@@ -38,17 +58,22 @@ CREATE TABLE IF NOT EXISTS tasks (
     end_time TIME NOT NULL,
     is_routine TINYINT(1) DEFAULT 0,
     routine_days JSON DEFAULT NULL,
+    attachment_required TINYINT(1) DEFAULT 0, -- Tambahan agar kompatibel dengan logika baru
     created_by INT DEFAULT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    -- Foreign Keys
     FOREIGN KEY (staff_id) REFERENCES users(id) ON DELETE CASCADE,
     FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL,
+    FOREIGN KEY (routine_template_id) REFERENCES routine_templates(id) ON DELETE SET NULL,
+    -- Indexes
     INDEX idx_staff_date (staff_id, task_date),
-    INDEX idx_date (task_date)
+    INDEX idx_date (task_date),
+    INDEX idx_template (routine_template_id) -- Index baru untuk performa update massal
 );
 
 -- =====================================================
--- 3. CHECKLIST ITEMS TABLE
+-- 4. CHECKLIST ITEMS TABLE
 -- =====================================================
 CREATE TABLE IF NOT EXISTS checklist_items (
     id INT AUTO_INCREMENT PRIMARY KEY,
@@ -62,7 +87,7 @@ CREATE TABLE IF NOT EXISTS checklist_items (
 );
 
 -- =====================================================
--- 4. COMMENTS TABLE
+-- 5. COMMENTS TABLE
 -- =====================================================
 CREATE TABLE IF NOT EXISTS comments (
     id INT AUTO_INCREMENT PRIMARY KEY,
@@ -75,7 +100,7 @@ CREATE TABLE IF NOT EXISTS comments (
 );
 
 -- =====================================================
--- 5. ATTACHMENTS TABLE
+-- 6. ATTACHMENTS TABLE
 -- =====================================================
 CREATE TABLE IF NOT EXISTS attachments (
     id INT AUTO_INCREMENT PRIMARY KEY,
@@ -88,7 +113,7 @@ CREATE TABLE IF NOT EXISTS attachments (
 );
 
 -- =====================================================
--- 6. NOTIFICATIONS TABLE
+-- 7. NOTIFICATIONS TABLE
 -- =====================================================
 CREATE TABLE IF NOT EXISTS notifications (
     id INT AUTO_INCREMENT PRIMARY KEY,
@@ -108,7 +133,7 @@ CREATE TABLE IF NOT EXISTS notifications (
 );
 
 -- =====================================================
--- 6B. TASK MENTIONS TABLE (for collaboration)
+-- 8. TASK MENTIONS TABLE
 -- =====================================================
 CREATE TABLE IF NOT EXISTS task_mentions (
     id INT AUTO_INCREMENT PRIMARY KEY,
@@ -123,24 +148,7 @@ CREATE TABLE IF NOT EXISTS task_mentions (
 );
 
 -- =====================================================
--- 7. ROUTINE TEMPLATES TABLE
--- =====================================================
-CREATE TABLE IF NOT EXISTS routine_templates (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    department VARCHAR(100) NOT NULL,
-    title VARCHAR(255) NOT NULL,
-    duration_hours DECIMAL(3,1) DEFAULT 1.0,
-    routine_days JSON DEFAULT NULL,
-    checklist_template JSON DEFAULT NULL,
-    default_start_time TIME DEFAULT '09:00:00',
-    is_active TINYINT(1) DEFAULT 1,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    INDEX idx_department (department)
-);
-
--- =====================================================
--- 8. REQUEST LOG TABLE (untuk tracking request antar user)
+-- 9. REQUEST LOG TABLE
 -- =====================================================
 CREATE TABLE IF NOT EXISTS request_log (
     id INT AUTO_INCREMENT PRIMARY KEY,
@@ -158,12 +166,10 @@ CREATE TABLE IF NOT EXISTS request_log (
 -- =====================================================
 -- INSERT DEFAULT DATA
 -- =====================================================
-
--- Insert Super Admin (password: admin)
+-- (Data Users tetap sama, tidak saya ubah)
 INSERT INTO users (username, password, name, role, avatar) VALUES
 ('admin', '$2y$10$ogKlOoKzQQddV5X9InNUMeY6ud5g.Twb8GitVUvJDC0cJLEHL/vQ2', 'Super Admin', 'Admin', 'https://api.dicebear.com/7.x/avataaars/svg?seed=Admin');
 
--- Insert Default Staff (password: 1234)
 INSERT INTO users (username, password, name, role, avatar) VALUES
 ('fallah', '$2y$10$jfhy2B4aBLi6wFQ1xNN4aOu0EO7uvinY2Q75fhgGZOwmLJ8boO6D2', 'Fallah', 'Advertiser', 'https://api.dicebear.com/7.x/avataaars/svg?seed=Fallah'),
 ('hilal', '$2y$10$jfhy2B4aBLi6wFQ1xNN4aOu0EO7uvinY2Q75fhgGZOwmLJ8boO6D2', 'Hilal', 'Design Grafis', 'https://api.dicebear.com/7.x/avataaars/svg?seed=Hilal'),
@@ -173,7 +179,7 @@ INSERT INTO users (username, password, name, role, avatar) VALUES
 ('rina', '$2y$10$jfhy2B4aBLi6wFQ1xNN4aOu0EO7uvinY2Q75fhgGZOwmLJ8boO6D2', 'Rina', 'Marketplace', 'https://api.dicebear.com/7.x/avataaars/svg?seed=Rina'),
 ('andi', '$2y$10$jfhy2B4aBLi6wFQ1xNN4aOu0EO7uvinY2Q75fhgGZOwmLJ8boO6D2', 'Andi', 'Gudang', 'https://api.dicebear.com/7.x/avataaars/svg?seed=Andi');
 
--- Insert Default Routine Templates
+-- (Data Template tetap sama)
 INSERT INTO routine_templates (department, title, duration_hours, routine_days, checklist_template, default_start_time) VALUES
 ('Advertiser', 'Cek & Optimasi Iklan Pagi', 2.0, '[1,2,3,4,5,6,0]', '["Cek Cost Per Result", "Matikan Iklan Boncos", "Scale Up Winning Campaign"]', '09:00:00'),
 ('Customer Service', 'Balas Chat & Follow Up Pagi', 3.0, '[1,2,3,4,5,6,0]', '["Reply Chat Pending Semalam", "Follow Up Belum Transfer"]', '08:00:00'),
@@ -186,7 +192,6 @@ INSERT INTO routine_templates (department, title, duration_hours, routine_days, 
 -- HELPFUL VIEWS
 -- =====================================================
 
--- View: Tasks with Staff Info
 CREATE OR REPLACE VIEW v_tasks_detail AS
 SELECT 
     t.*,
@@ -198,7 +203,6 @@ SELECT
 FROM tasks t
 JOIN users u ON t.staff_id = u.id;
 
--- View: Staff Performance
 CREATE OR REPLACE VIEW v_staff_performance AS
 SELECT 
     u.id,
