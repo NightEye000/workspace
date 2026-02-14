@@ -219,8 +219,8 @@ const API = {
     },
 
     // Routine Templates
-    async getRoutineTemplates(department = '') {
-        return this.request(`routines.php?action=list&department=${department}`);
+    async getRoutineTemplates(department = '', userId = '') {
+        return this.request(`routines.php?action=list&department=${department}&user_id=${userId}`);
     },
 
     // Work History

@@ -2913,7 +2913,7 @@ const App = {
         if (this.state.user.role === 'Admin') return;
 
         try {
-            const res = await API.getRoutineTemplates(this.state.user.role);
+            const res = await API.getRoutineTemplates(this.state.user.role, this.state.user.id);
             const select = document.getElementById('routine-template');
 
             // Clear previous options

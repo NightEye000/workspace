@@ -29,7 +29,8 @@ CREATE TABLE IF NOT EXISTS users (
 -- Tabel ini harus ada DULUAN sebelum Tasks
 CREATE TABLE IF NOT EXISTS routine_templates (
     id INT AUTO_INCREMENT PRIMARY KEY,
-    department VARCHAR(100) NOT NULL,
+    user_id INT NULL, -- Personal User Based
+    department VARCHAR(100) NULL, -- Optional/Legacy
     title VARCHAR(255) NOT NULL,
     duration_hours DECIMAL(3,1) DEFAULT 1.0,
     routine_days JSON DEFAULT NULL,
@@ -39,7 +40,8 @@ CREATE TABLE IF NOT EXISTS routine_templates (
     is_active TINYINT(1) DEFAULT 1,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    INDEX idx_department (department)
+    INDEX idx_department (department),
+    INDEX idx_user_id (user_id)
 );
 
 -- =====================================================

@@ -34,16 +34,21 @@ switch ($action) {
 function getTemplates() {
     $db = getDB();
     $department = $_GET['department'] ?? '';
+    $userId = $_GET['user_id'] ?? '';
     
     $sql = "SELECT * FROM routine_templates WHERE is_active = 1";
     $params = [];
     
-    if (!empty($department)) {
-        $sql .= " AND department = ?";
-        $params[] = $department;
+    if (!empty($userId)) {
+        $sql .= " AND user_id = ?";
+        $params[] = $userId;
+    } elseif (!empty($department)) {
+         // Legacy support strictly for admin view if needed, but generation ignores it
+         $sql .= " AND department = ?";
+         $params[] = $department;
     }
     
-    $sql .= " ORDER BY department, title";
+    $sql .= " ORDER BY title";
     
     $stmt = $db->prepare($sql);
     $stmt->execute($params);
@@ -85,14 +90,20 @@ function createTemplate() {
     $input = json_decode(file_get_contents('php://input'), true);
     
     $department = sanitize($input['department'] ?? '');
+    $userId = !empty($input['user_id']) ? intval($input['user_id']) : null;
     $title = sanitize($input['title'] ?? '');
     $duration = floatval($input['duration_hours'] ?? 1);
     $routineDays = $input['routine_days'] ?? [];
     $checklist = $input['checklist_template'] ?? [];
     $startTime = $input['default_start_time'] ?? '09:00:00';
     
-    if (empty($department) || empty($title)) {
-        jsonResponse(['success' => false, 'message' => 'Department and title required'], 400);
+    if (empty($title)) {
+        jsonResponse(['success' => false, 'message' => 'Title required'], 400);
+    }
+    
+    // User Requirement: "Personal User Aja"
+    if (empty($userId)) {
+         jsonResponse(['success' => false, 'message' => 'User ID required (System is now Personal-User based)'], 400);
     }
 
     if (isset($input['default_start_time']) && !preg_match('/^([01]\d|2[0-3]):([0-5]\d)(:[0-5]\d)?$/', $input['default_start_time'])) {
@@ -100,8 +111,8 @@ function createTemplate() {
     }
     
     $db = getDB();
-    $stmt = $db->prepare("INSERT INTO routine_templates (department, title, duration_hours, routine_days, checklist_template, default_start_time) VALUES (?, ?, ?, ?, ?, ?)");
-    $stmt->execute([$department, $title, $duration, json_encode($routineDays), json_encode($checklist), $startTime]);
+    $stmt = $db->prepare("INSERT INTO routine_templates (department, user_id, title, duration_hours, routine_days, checklist_template, default_start_time) VALUES (?, ?, ?, ?, ?, ?, ?)");
+    $stmt->execute([$department ?: null, $userId, $title, $duration, json_encode($routineDays), json_encode($checklist), $startTime]);
     
     jsonResponse(['success' => true, 'id' => $db->lastInsertId()]);
 }
@@ -123,10 +134,14 @@ function updateTemplate() {
         jsonResponse(['success' => false, 'message' => 'Format waktu start tidak valid (HH:MM)'], 400);
     }
     
+    $department = sanitize($input['department'] ?? '');
+    $userId = !empty($input['user_id']) ? intval($input['user_id']) : null;
+    
     $db = getDB();
-    $stmt = $db->prepare("UPDATE routine_templates SET department = ?, title = ?, duration_hours = ?, routine_days = ?, checklist_template = ?, default_start_time = ? WHERE id = ?");
+    $stmt = $db->prepare("UPDATE routine_templates SET department = ?, user_id = ?, title = ?, duration_hours = ?, routine_days = ?, checklist_template = ?, default_start_time = ? WHERE id = ?");
     $stmt->execute([
-        sanitize($input['department']),
+        $department ?: null,
+        $userId,
         sanitize($input['title']),
         floatval($input['duration_hours']),
         json_encode($input['routine_days'] ?? []),

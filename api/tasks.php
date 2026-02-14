@@ -964,9 +964,9 @@ function generateRoutines() {
         foreach ($users as $user) {
             $dept = $user['role'];
             
-            // A. Fetch Department Templates ONCE
-            $stmtTpl = $db->prepare("SELECT * FROM routine_templates WHERE department = ? AND is_active = 1");
-            $stmtTpl->execute([$dept]);
+            // A. Fetch Personal Templates ONLY (User Requirement: "Tidak terpengaruh role")
+            $stmtTpl = $db->prepare("SELECT * FROM routine_templates WHERE user_id = ? AND is_active = 1");
+            $stmtTpl->execute([$user['id']]);
             $templates = $stmtTpl->fetchAll();
 
             // B. Fetch Personal Routines ONCE
