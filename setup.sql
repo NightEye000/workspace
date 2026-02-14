@@ -164,33 +164,55 @@ CREATE TABLE IF NOT EXISTS request_log (
 );
 
 -- =====================================================
+-- 10. ANNOUNCEMENTS TABLE (NEW)
+-- =====================================================
+CREATE TABLE IF NOT EXISTS announcements (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    title VARCHAR(255) NOT NULL,
+    message TEXT NOT NULL,
+    sender_id INT NOT NULL,
+    is_active TINYINT(1) DEFAULT 1,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (sender_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+-- =====================================================
+-- 11. ANNOUNCEMENT READS TABLE (Track popup dismissal)
+-- =====================================================
+CREATE TABLE IF NOT EXISTS announcement_reads (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    announcement_id INT NOT NULL,
+    user_id INT NOT NULL,
+    read_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY unique_read (announcement_id, user_id),
+    FOREIGN KEY (announcement_id) REFERENCES announcements(id) ON DELETE CASCADE,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+-- =====================================================
 -- INSERT DEFAULT DATA
 -- =====================================================
--- (Data Users tetap sama, tidak saya ubah)
 INSERT INTO users (username, password, name, role, avatar) VALUES
 ('admin', '$2y$10$ogKlOoKzQQddV5X9InNUMeY6ud5g.Twb8GitVUvJDC0cJLEHL/vQ2', 'Super Admin', 'Admin', 'https://api.dicebear.com/7.x/avataaars/svg?seed=Admin');
-
-INSERT INTO users (username, password, name, role, avatar) VALUES
-('fallah', '$2y$10$jfhy2B4aBLi6wFQ1xNN4aOu0EO7uvinY2Q75fhgGZOwmLJ8boO6D2', 'Fallah', 'Advertiser', 'https://api.dicebear.com/7.x/avataaars/svg?seed=Fallah'),
-('hilal', '$2y$10$jfhy2B4aBLi6wFQ1xNN4aOu0EO7uvinY2Q75fhgGZOwmLJ8boO6D2', 'Hilal', 'Design Grafis', 'https://api.dicebear.com/7.x/avataaars/svg?seed=Hilal'),
-('putri', '$2y$10$jfhy2B4aBLi6wFQ1xNN4aOu0EO7uvinY2Q75fhgGZOwmLJ8boO6D2', 'Putri', 'Konten Video', 'https://api.dicebear.com/7.x/avataaars/svg?seed=Putri'),
-('budi', '$2y$10$jfhy2B4aBLi6wFQ1xNN4aOu0EO7uvinY2Q75fhgGZOwmLJ8boO6D2', 'Budi', 'Admin Order', 'https://api.dicebear.com/7.x/avataaars/svg?seed=Budi'),
-('sari', '$2y$10$jfhy2B4aBLi6wFQ1xNN4aOu0EO7uvinY2Q75fhgGZOwmLJ8boO6D2', 'Sari', 'Customer Service', 'https://api.dicebear.com/7.x/avataaars/svg?seed=Sari'),
-('rina', '$2y$10$jfhy2B4aBLi6wFQ1xNN4aOu0EO7uvinY2Q75fhgGZOwmLJ8boO6D2', 'Rina', 'Marketplace', 'https://api.dicebear.com/7.x/avataaars/svg?seed=Rina'),
-('andi', '$2y$10$jfhy2B4aBLi6wFQ1xNN4aOu0EO7uvinY2Q75fhgGZOwmLJ8boO6D2', 'Andi', 'Gudang', 'https://api.dicebear.com/7.x/avataaars/svg?seed=Andi');
-
--- (Data Template tetap sama)
-INSERT INTO routine_templates (department, title, duration_hours, routine_days, checklist_template, default_start_time) VALUES
-('Advertiser', 'Cek & Optimasi Iklan Pagi', 2.0, '[1,2,3,4,5,6,0]', '["Cek Cost Per Result", "Matikan Iklan Boncos", "Scale Up Winning Campaign"]', '09:00:00'),
-('Customer Service', 'Balas Chat & Follow Up Pagi', 3.0, '[1,2,3,4,5,6,0]', '["Reply Chat Pending Semalam", "Follow Up Belum Transfer"]', '08:00:00'),
-('Design Grafis', 'Creative Research & Ideation', 1.0, '[1,3,5]', '["Cek Trend Kompetitor", "Kumpul Referensi Visual"]', '09:00:00'),
-('Marketplace', 'Cek Pesanan & Stok MP', 2.0, '[1,2,3,4,5,6,0]', '["Print Label Pengiriman", "Update Stok Toko"]', '08:00:00'),
-('Gudang', 'Packing Paket Reguler', 3.0, '[1,2,3,4,5,6,0]', '["Packing Barang", "Tempel Resi", "Serah Terima Kurir"]', '09:00:00'),
-('Konten Video', 'Brainstorming Ide Konten', 1.0, '[1,4]', '["Scroll TikTok/Reels Trend", "List Ide Script"]', '10:00:00');
 
 -- =====================================================
 -- HELPFUL VIEWS
 -- =====================================================
+
+-- =============================================
+-- NOTES TABLE (Notepad Feature)
+-- =============================================
+CREATE TABLE IF NOT EXISTS notes (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    staff_id INT NOT NULL,
+    title VARCHAR(255) NOT NULL,
+    content TEXT NOT NULL,
+    visibility ENUM('private', 'public', 'shared') DEFAULT 'private',
+    shared_with_depts JSON DEFAULT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (staff_id) REFERENCES users(id) ON DELETE CASCADE
+);
 
 CREATE OR REPLACE VIEW v_tasks_detail AS
 SELECT 

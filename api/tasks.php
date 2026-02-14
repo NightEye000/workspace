@@ -322,7 +322,9 @@ function createTask() {
     $routineTemplateId = null;
 
     if ($isRoutine == 1) {
-        $user = $db->query("SELECT role FROM users WHERE id = $targetStaffId")->fetch();
+        $stmtUser = $db->prepare("SELECT role FROM users WHERE id = ?");
+        $stmtUser->execute([$targetStaffId]);
+        $user = $stmtUser->fetch();
         $dept = $user['role'];
 
         // Calculate duration
@@ -611,7 +613,9 @@ function updateTask() {
 
         // If no template ID (Legacy Support), try to find/create one
         if (!$routineTemplateId) {
-            $user = $db->query("SELECT role FROM users WHERE id = {$task['staff_id']}")->fetch();
+            $stmtUser = $db->prepare("SELECT role FROM users WHERE id = ?");
+            $stmtUser->execute([$task['staff_id']]);
+            $user = $stmtUser->fetch();
             $dept = $user['role'];
             $oldTitle = $task['title']; 
             
@@ -682,9 +686,9 @@ function updateTask() {
             $futureTaskIds = $stmtIds->fetchAll(PDO::FETCH_COLUMN);
             
             if (!empty($futureTaskIds)) {
-                $idsStr = implode(',', $futureTaskIds);
-                
-                $db->exec("DELETE FROM checklist_items WHERE task_id IN ($idsStr)");
+                $delPlaceholders = implode(',', array_fill(0, count($futureTaskIds), '?'));
+                $stmtDel = $db->prepare("DELETE FROM checklist_items WHERE task_id IN ($delPlaceholders)");
+                $stmtDel->execute($futureTaskIds);
                 
                  if (!empty($checklistTpl)) {
                      $stmtBatchItem = $db->prepare("INSERT INTO checklist_items (task_id, text, sort_order) VALUES (?, ?, ?)");
@@ -796,8 +800,20 @@ function deleteTask() {
     $task = $stmt->fetch();
     
     if ($task && canAccessStaff($task['staff_id'])) {
-        $db->prepare("DELETE FROM tasks WHERE id = ?")->execute([$id]);
-        jsonResponse(['success' => true, 'message' => 'Tugas berhasil dihapus']);
+        $db->beginTransaction();
+        try {
+            $db->prepare("DELETE FROM checklist_items WHERE task_id = ?")->execute([$id]);
+            $db->prepare("DELETE FROM comments WHERE task_id = ?")->execute([$id]);
+            $db->prepare("DELETE FROM attachments WHERE task_id = ?")->execute([$id]);
+            $db->prepare("DELETE FROM task_mentions WHERE task_id = ?")->execute([$id]);
+            $db->prepare("DELETE FROM tasks WHERE id = ?")->execute([$id]);
+            $db->commit();
+            jsonResponse(['success' => true, 'message' => 'Tugas berhasil dihapus']);
+        } catch (Exception $e) {
+            $db->rollBack();
+            error_log("Delete task failed: " . $e->getMessage());
+            jsonResponse(['success' => false, 'message' => 'Gagal menghapus tugas'], 500);
+        }
     } else {
         jsonResponse(['success' => false, 'message' => 'Tidak diizinkan'], 403);
     }
@@ -910,7 +926,13 @@ function generateRoutines() {
     }
 
     $input = json_decode(file_get_contents('php://input'), true);
+    
+    // Bug Fix: Validate date format to prevent invalid dates (e.g. generating from 1970)
     $startDate = $input['date'] ?? date('Y-m-d');
+    $parsedDate = DateTime::createFromFormat('Y-m-d', $startDate);
+    if (!$parsedDate || $parsedDate->format('Y-m-d') !== $startDate) {
+        $startDate = date('Y-m-d'); // Fallback to today if invalid
+    }
     
     // Determine WHO to generate for
     $targetUserId = null;
@@ -936,6 +958,8 @@ function generateRoutines() {
     $count = 0;
     $currentActionUserId = getCurrentUser()['id'] ?? null;
 
+    // Bug Fix: Use transaction for data consistency
+    $db->beginTransaction();
     try {
         foreach ($users as $user) {
             $dept = $user['role'];
@@ -947,7 +971,7 @@ function generateRoutines() {
 
             // B. Fetch Personal Routines ONCE
             $stmtPersonal = $db->prepare("
-                SELECT title, start_time, end_time, routine_days, staff_id 
+                SELECT title, start_time, end_time, routine_days, staff_id, routine_template_id 
                 FROM tasks 
                 WHERE staff_id = ? AND is_routine = 1 
                 ORDER BY id DESC
@@ -966,7 +990,7 @@ function generateRoutines() {
             // LOOP 30 DAYS (1 Months)
             for ($d = 0; $d < 30; $d++) {
                 $targetDate = date('Y-m-d', strtotime("$startDate +$d days"));
-                $dayOfWeek = date('w', strtotime($targetDate));
+                $dayOfWeek = (int) date('w', strtotime($targetDate)); // Bug Fix: Cast to int for type-safe in_array
 
                 // 1. Process Templates
                 foreach ($templates as $tpl) {
@@ -989,17 +1013,18 @@ function generateRoutines() {
                             $endTime = date('H:i:s', strtotime($startTime) + ($duration * 3600));
 
                             $stmtInsert = $db->prepare("
-                                INSERT INTO tasks (staff_id, title, category, status, task_date, start_time, end_time, is_routine, routine_days, created_by) 
-                                VALUES (?, ?, 'Jobdesk', 'todo', ?, ?, ?, 1, ?, ?)
+                                INSERT INTO tasks (staff_id, title, category, status, task_date, start_time, end_time, is_routine, routine_days, created_by, routine_template_id) 
+                                VALUES (?, ?, 'Jobdesk', 'todo', ?, ?, ?, 1, ?, ?, ?)
                             ");
                             $stmtInsert->execute([
                                 $user['id'],
                                 $tpl['title'],
-                                $targetDate, // Loop Date
+                                $targetDate,
                                 $startTime,
                                 $endTime,
                                 $tpl['routine_days'],
-                                $currentActionUserId
+                                $currentActionUserId,
+                                $tpl['id']  // Bug Fix: Link task to its template
                             ]);
                             
                             $taskId = $db->lastInsertId();
@@ -1027,9 +1052,10 @@ function generateRoutines() {
                         
                         if (!$stmtCheck->fetch()) {
                             // Insert
+                            $personalTemplateId = $routine['routine_template_id'] ?? null;
                             $stmtInsert = $db->prepare("
-                                INSERT INTO tasks (staff_id, title, category, status, task_date, start_time, end_time, is_routine, routine_days, created_by) 
-                                VALUES (?, ?, 'Jobdesk', 'todo', ?, ?, ?, 1, ?, ?)
+                                INSERT INTO tasks (staff_id, title, category, status, task_date, start_time, end_time, is_routine, routine_days, created_by, routine_template_id) 
+                                VALUES (?, ?, 'Jobdesk', 'todo', ?, ?, ?, 1, ?, ?, ?)
                             ");
                             $params = [
                                 $user['id'],
@@ -1038,7 +1064,8 @@ function generateRoutines() {
                                 $routine['start_time'],
                                 $routine['end_time'],
                                 $routine['routine_days'],
-                                $currentActionUserId
+                                $currentActionUserId,
+                                $personalTemplateId  // Bug Fix: Carry over template ID
                             ];
                             
                             try {
@@ -1077,23 +1104,39 @@ function generateRoutines() {
             } // End Days Loop
         } // End Users Loop
         
+        $db->commit();
+
         if ($count > 0) {
             jsonResponse(['success' => true, 'message' => "Berhasil: $count tugas rutinitas baru telah dibuat."]);
         } else {
-            // Check if we actually found templates but they were all duplicates
-            // For now, if 0 created, we assume they were largely existing or no templates
-            // Let's refine this by just saying "Data already up to date"
             jsonResponse(['success' => false, 'message' => "Gagal: Rutinitas untuk 30 hari ke depan sudah ada. Tidak ada data baru yang ditambahkan."]);
         }
 
     } catch (Exception $e) {
+        $db->rollBack();
         jsonResponse(['success' => false, 'message' => 'Error generating routines: ' . $e->getMessage()], 500);
     }
 }
 
 function getStaffPerformance() {
     global $db;
-    $sql = "SELECT * FROM v_staff_performance ORDER BY task_date DESC, performance_percent DESC LIMIT 100";
+    $sql = "
+        SELECT 
+            u.id as staff_id,
+            u.name as staff_name,
+            u.role,
+            t.task_date,
+            COUNT(t.id) as total_tasks,
+            SUM(CASE WHEN t.status = 'done' THEN 1 ELSE 0 END) as completed_tasks,
+            ROUND(SUM(CASE WHEN t.status = 'done' THEN 1 ELSE 0 END) * 100.0 / NULLIF(COUNT(t.id), 0), 1) as performance_percent
+        FROM users u
+        LEFT JOIN tasks t ON u.id = t.staff_id
+        WHERE u.is_active = 1 AND u.role != 'Admin'
+        GROUP BY u.id, u.name, u.role, t.task_date
+        HAVING t.task_date IS NOT NULL
+        ORDER BY t.task_date DESC, performance_percent DESC
+        LIMIT 100
+    ";
     $data = $db->query($sql)->fetchAll();
     jsonResponse(['success' => true, 'data' => $data]);
 }

@@ -42,10 +42,11 @@ function getWorkHistory() {
         $today = date('Y-m-d');
         $now = date('H:i:s');
         
-        // Get tasks that are:
-        // 1. Status = 'done' (completed tasks)
-        // 2. OR task_date < today (past date, regardless of status)
-        // 3. OR task_date = today AND end_time < now AND status != 'done' (today but deadline passed)
+        if(!isAdmin()) {
+            $staffId = $currentUser['id'];
+        } elseif ($staffId !== null && !canAccessStaff($staffId)) {
+            jsonResponse(['success' => false, 'message' => 'Access denied'], 403);
+        }
         
         $sql = "
             SELECT 

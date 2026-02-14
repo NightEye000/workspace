@@ -130,6 +130,8 @@ function updatePassword() {
         jsonResponse(['success' => false, 'message' => 'Method not allowed'], 405);
     }
     
+    verifyCSRFToken();
+
     $user = getCurrentUser();
     if (!$user) {
         jsonResponse(['success' => false, 'message' => 'Unauthorized'], 401);

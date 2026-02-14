@@ -1,65 +1,50 @@
 <?php
-/**
- * PHP Native Cache Clear Utility
- * Inspired by php artisan optimize:clear
- */
+require_once __DIR__ . '/config/database.php';
+require_once __DIR__ . '/config/constants.php';
 
-// Define paths to clear
-$targets = [
-    'Logs' => __DIR__ . '/logs',
-    'Temp' => __DIR__ . '/tmp', // In case it exists in the future
-];
+// Get non-admin users
+try {
+    $db = getDB();
+    $sql = "SELECT id, username FROM users WHERE role != 'Admin'";
+    $stmt = $db->query($sql);
+    $users = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-echo "------------------------------------------\n";
-echo "   PHP Native Project Cache Cleaner\n";
-echo "------------------------------------------\n\n";
-
-// 1. Clear OPcache
-if (function_exists('opcache_reset')) {
-    if (opcache_reset()) {
-        echo "[√] OPcache: Successfully reset.\n";
-    } else {
-        echo "[x] OPcache: Failed to reset (is it enabled?).\n";
+    if (count($users) === 0) {
+        echo "No non-admin users found to clear tasks for.
+";
     }
-} else {
-    echo "[!] OPcache: Extension not loaded.\n";
-}
 
-// 2. Clear Specific Directories
-foreach ($targets as $label => $path) {
-    if (is_dir($path)) {
-        echo "[...] $label: Cleaning $path...\n";
-        
-        $files = new RecursiveIteratorIterator(
-            new RecursiveDirectoryIterator($path, RecursiveDirectoryIterator::SKIP_DOTS),
-            RecursiveIteratorIterator::CHILD_FIRST
-        );
+    foreach ($users as $user) {
+        echo "Processing user: {$user['username']} (ID: {$user['id']})
+";
 
-        $count = 0;
-        foreach ($files as $fileinfo) {
-            // Keep .gitkeep if exists
-            if ($fileinfo->getFilename() === '.gitkeep') continue;
-            
-            $todo = ($fileinfo->isDir() ? 'rmdir' : 'unlink');
-            if ($todo($fileinfo->getRealPath())) {
-                $count++;
-            }
-        }
-        echo "[√] $label: $count items cleared.\n";
-    } else {
-        // echo "[i] $label: Directory not found, skipping.\n";
+        // Delete tasks
+        $stmt = $db->prepare("DELETE FROM tasks WHERE staff_id = ?");
+        $stmt->execute([$user['id']]);
+        echo "  - Deleted tasks: {$stmt->rowCount()} rows
+";
+
+        // Delete checklist items
+        $stmt = $db->prepare("DELETE FROM checklist_items WHERE task_id IN (SELECT id FROM tasks WHERE staff_id = ?)");
+        $stmt->execute([$user['id']]);
+
+        // Delete attachments
+        $stmt = $db->prepare("DELETE FROM attachments WHERE task_id IN (SELECT id FROM tasks WHERE staff_id = ?)");
+        $stmt->execute([$user['id']]);
+
+        // Delete comments
+        $stmt = $db->prepare("DELETE FROM comments WHERE task_id IN (SELECT id FROM tasks WHERE staff_id = ?)");
+        $stmt->execute([$user['id']]);
+
+        // Delete notifications
+        $stmt = $db->prepare("DELETE FROM notifications WHERE user_id = ?");
+        $stmt->execute([$user['id']]);
+        echo "  - Deleted notifications: {$stmt->rowCount()} rows
+";
     }
-}
 
-// 3. Clear Session (Optional - use with care)
-/*
-if (session_status() === PHP_SESSION_NONE) {
-    session_start();
+    echo "Cleanup complete for non-admin users.
+";
+} catch (PDOException $e) {
+    die("DB Error: " . $e->getMessage());
 }
-session_destroy();
-echo "[√] Sessions: Destroyed current session.\n";
-*/
-
-echo "\n------------------------------------------\n";
-echo "   DONE: Project is now fresh!\n";
-echo "------------------------------------------\n";

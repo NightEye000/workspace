@@ -68,8 +68,8 @@ const NotificationManager = {
         }
 
         const defaultOptions = {
-            icon: 'assets/images/logo.png',
-            badge: 'assets/images/badge.png',
+            icon: 'assets/images/Group 1.png',
+            badge: 'assets/images/Group 1.png',
             vibrate: [200, 100, 200],
             requireInteraction: true,
             tag: options.tag || 'officesync-' + Date.now(),

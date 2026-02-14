@@ -39,11 +39,11 @@
             <form id="login-form">
                 <div class="form-group">
                     <label>Username</label>
-                    <input type="text" id="login-username" placeholder="Username (ex: fallah, admin)" required>
+                    <input type="text" id="login-username" placeholder="Username" required>
                 </div>
                 <div class="form-group">
                     <label>Password</label>
-                    <input type="password" id="login-password" placeholder="Password (default: 1234)" required>
+                    <input type="password" id="login-password" placeholder="Masukkan password" required>
                 </div>
                 <div id="login-error" class="error-message hidden"></div>
                 <button type="submit" class="btn btn-primary btn-block">Masuk</button>
@@ -86,10 +86,34 @@
                     
                     <div class="divider-vertical"></div>
                     
+                    <!-- View Mode Toggle: Timeline | Notepad -->
+                    <div id="app-view-toggle" class="app-view-toggle">
+                        <button class="app-view-btn active" data-appview="timeline" onclick="App.setAppView('timeline')">
+                            <i data-lucide="layout" style="width:14px;height:14px;"></i>
+                            <span>Timeline</span>
+                        </button>
+                        <button class="app-view-btn" data-appview="notepad" onclick="App.setAppView('notepad')">
+                            <i data-lucide="sticky-note" style="width:14px;height:14px;"></i>
+                            <span>Notepad</span>
+                        </button>
+                    </div>
+                    
+                    <div class="divider-vertical"></div>
+                    
                     <!-- Admin: User Management -->
                     <button id="btn-user-management" class="btn btn-ghost hidden">
                         <i data-lucide="users"></i>
                         <span>Users</span>
+                    </button>
+
+                    <!-- Admin: Create Announcement -->
+                    <button id="btn-create-announcement" class="icon-btn hidden" title="Buat Pengumuman" style="color:#d97706; background:#fffbeb;">
+                        <i data-lucide="megaphone"></i>
+                    </button>
+
+                    <!-- Announcement History (All users) -->
+                    <button id="btn-announcement-history" class="icon-btn" title="Riwayat Pengumuman" style="color:#6366f1; background:#eef2ff; margin-right:8px;">
+                        <i data-lucide="scroll-text"></i>
                     </button>
                     
                     <!-- Add Work (Staff) -->
@@ -241,53 +265,97 @@
                     <!-- History will be rendered here -->
                 </div>
             </div>
+
+            <!-- ============ NOTEPAD VIEW (Hidden by default) ============ -->
+            <div id="notepad-view" class="notepad-view hidden">
+                <!-- Notepad Header -->
+                <div class="notepad-header">
+                    <div class="notepad-header-left">
+                        <h2><i data-lucide="sticky-note" style="width:24px;height:24px;display:inline-block;vertical-align:text-bottom;margin-right:8px;"></i>Notepad</h2>
+                        <p>Catatan pribadi, publik & berbagi antar divisi</p>
+                    </div>
+                    <div class="notepad-header-right">
+                        <button id="btn-create-note" class="btn btn-primary">
+                            <i data-lucide="plus"></i>
+                            <span>Buat Catatan</span>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Notepad Filter -->
+                <div class="notepad-filters">
+                    <button class="notepad-filter-btn active" data-notefilter="all" onclick="App.setNotepadFilter('all', this)">Semua</button>
+                    <button class="notepad-filter-btn" data-notefilter="mine" onclick="App.setNotepadFilter('mine', this)">Catatan Saya</button>
+                    <button class="notepad-filter-btn" data-notefilter="public" onclick="App.setNotepadFilter('public', this)">Publik</button>
+                    <button class="notepad-filter-btn" data-notefilter="shared" onclick="App.setNotepadFilter('shared', this)">Berbagi ke Saya</button>
+                </div>
+
+                <!-- Notes Grid -->
+                <div id="notepad-grid" class="notepad-grid">
+                    <!-- Notes will be rendered here by JS -->
+                </div>
+
+                <!-- Notepad Loading -->
+                <div id="notepad-loading" class="notepad-loading hidden">
+                    <div class="spinner"></div>
+                    <p>Memuat catatan...</p>
+                </div>
+            </div>
         </main>
 
-        <!-- Mobile Bottom Navigation (Simple Version) -->
+        <!-- Mobile Bottom Navigation (Burger + Action + Request) -->
         <nav class="mobile-bottom-nav simple-nav">
-             <button class="btn btn-outline nav-btn-mobile" id="mobile-btn-request" style="flex:1; margin-right:8px;">
-                <i data-lucide="send"></i>
-                <span>Request</span>
+             <button class="nav-btn-mobile icon-only" id="mobile-burger-btn" onclick="document.getElementById('mobile-menu-drawer').classList.add('active')">
+                <i data-lucide="menu"></i>
             </button>
 
-             <button class="btn btn-primary nav-btn-mobile" id="mobile-btn-add-work" style="flex:1;">
-                <i data-lucide="plus-circle"></i>
-                <span>Tambah Pekerjaan</span>
+             <button class="btn btn-primary nav-action-btn" id="mobile-action-btn" onclick="App.mobileActionClick()">
+                <i data-lucide="plus-circle" style="width:18px;height:18px;"></i>
+                <span id="mobile-action-label">Tambah Pekerjaan</span>
+            </button>
+
+             <button class="nav-btn-mobile" id="mobile-btn-request-nav" onclick="document.getElementById('modal-request').classList.remove('hidden')">
+                <i data-lucide="send"></i>
+                <span class="ml-1">Request</span>
             </button>
         </nav>
         
         <!-- Mobile Menu Drawer (Side or Bottom) -->
-        <div id="mobile-menu-drawer" class="mobile-drawer hidden">
-             <div class="drawer-header">
-                <h3>Menu</h3>
-                <button class="drawer-close" id="close-mobile-menu"><i data-lucide="x"></i></button>
-             </div>
+        <div id="mobile-menu-drawer" class="mobile-drawer">
              <div class="drawer-content">
+                 <div class="drawer-header">
+                    <h3>Menu</h3>
+                    <button class="drawer-close" onclick="document.getElementById('mobile-menu-drawer').classList.remove('active')"><i data-lucide="x"></i></button>
+                 </div>
+                 
                  <div class="user-card-drawer">
                      <div class="avatar-circle" id="drawer-avatar"></div>
                      <div class="user-details">
                          <strong id="drawer-username">User</strong>
-                         <span id="drawer-role">Role</span>
-                         <button id="mobile-btn-profile" class="btn btn-xs btn-outline" style="margin-top:4px;">
-                            <i data-lucide="user-cog" style="width:12px;height:12px;"></i> Edit Profil
-                         </button>
                      </div>
                  </div>
                  
                  <div class="drawer-links">
-                     <!-- Admin Links -->
-                     <button id="mobile-btn-users" class="drawer-link hidden">
-                         <i data-lucide="users"></i> Management Users
+                     <div class="drawer-section-title">Tampilan</div>
+                     <button class="drawer-link" onclick="App.setAppView('timeline'); document.getElementById('mobile-menu-drawer').classList.remove('active');">
+                         <i data-lucide="layout"></i> Timeline
                      </button>
-                     <div class="drawer-divider"></div>
+                     <button class="drawer-link" onclick="App.setAppView('notepad'); document.getElementById('mobile-menu-drawer').classList.remove('active');">
+                         <i data-lucide="sticky-note"></i> Notepad
+                     </button>
                      
-                     <button id="mobile-btn-logout" class="drawer-link text-danger">
-                         <i data-lucide="log-out"></i> Logout
+                     <div class="drawer-divider"></div>
+                     <div class="drawer-section-title">Menu Lain</div>
+
+                     <button id="mobile-btn-history-drawer" class="drawer-link" onclick="App.openAnnouncementHistory(); document.getElementById('mobile-menu-drawer').classList.remove('active');">
+                         <i data-lucide="scroll-text"></i> Riwayat Pengumuman
                      </button>
                  </div>
              </div>
+                 </div>
+             </div>
         </div>
-    </div>
+
 
     <!-- Modals -->
     <div id="modal-overlay" class="modal-overlay hidden"></div>
@@ -728,6 +796,143 @@
                     <i data-lucide="save"></i> Simpan Perubahan
                 </button>
             </form>
+        </div>
+    </div>
+
+    <!-- Create Announcement Modal -->
+    <div id="modal-create-announcement" class="modal hidden">
+        <div class="modal-header" style="background:#fffbeb; border-bottom:1px solid #fcd34d;">
+            <h3 style="color:#b45309">Buat Pengumuman Baru</h3>
+            <button class="modal-close" data-modal="modal-create-announcement">
+                <i data-lucide="x"></i>
+            </button>
+        </div>
+        <div class="modal-body">
+             <form id="form-create-announcement">
+                 <div style="background:#fffbeb; color:#92400e; border:1px solid #fcd34d; padding:12px; border-radius:8px; margin-bottom:16px; font-size:0.8rem; display:flex; gap:8px; align-items:start;">
+                     <i data-lucide="info" style="width:16px; margin-top:2px;"></i>
+                     <span>Pengumuman akan muncul sebagai Popup untuk semua staff. Gunakan untuk info penting.</span>
+                 </div>
+                 <div class="form-group">
+                     <label>Judul Pengumuman</label>
+                     <input type="text" id="ann-title" placeholder="Contoh: Perubahan Kebijakan..." required>
+                 </div>
+                 <div class="form-group">
+                     <label>Isi Pesan</label>
+                     <textarea id="ann-message" rows="4" placeholder="Tulis pesan lengkap..." required></textarea>
+                 </div>
+                 <button type="submit" class="btn btn-block" style="background:#f59e0b; color:white;">
+                     <i data-lucide="send"></i> Broadcast Sekarang
+                 </button>
+             </form>
+        </div>
+    </div>
+
+    <!-- Announcement History Modal -->
+    <div id="modal-announcement-history" class="modal hidden">
+        <div class="modal-header" style="background:linear-gradient(135deg, #eef2ff, #e0e7ff); border-bottom:1px solid #c7d2fe;">
+            <div style="display:flex; align-items:center; gap:10px;">
+                <div style="width:32px;height:32px;background:var(--primary);border-radius:8px;display:flex;align-items:center;justify-content:center;">
+                    <i data-lucide="scroll-text" style="width:16px;height:16px;color:white;"></i>
+                </div>
+                <div>
+                    <h3 style="color:var(--slate-800); font-size:1rem; font-weight:700;">Riwayat Pengumuman</h3>
+                    <p style="font-size:0.7rem; color:var(--slate-500); margin-top:-2px;">Semua pengumuman perusahaan</p>
+                </div>
+            </div>
+            <button class="modal-close" data-modal="modal-announcement-history">
+                <i data-lucide="x"></i>
+            </button>
+        </div>
+        <div class="modal-body" style="padding:0; max-height:65vh; overflow-y:auto;">
+            <div id="announcement-history-content"></div>
+        </div>
+    </div>
+
+    <!-- Note Create/Edit Modal -->
+    <div id="modal-note" class="modal hidden">
+        <div class="modal-header" style="background:linear-gradient(135deg,#eef2ff,#e0e7ff); border-bottom:1px solid #c7d2fe;">
+            <div style="display:flex; align-items:center; gap:10px;">
+                <div style="width:32px;height:32px;background:var(--primary);border-radius:8px;display:flex;align-items:center;justify-content:center;">
+                    <i data-lucide="sticky-note" style="width:16px;height:16px;color:white;"></i>
+                </div>
+                <div>
+                    <h3 id="note-modal-title" style="color:var(--slate-800); font-size:1rem; font-weight:700;">Buat Catatan Baru</h3>
+                    <p style="font-size:0.7rem; color:var(--slate-500); margin-top:-2px;">Tulis dan atur visibilitas catatan</p>
+                </div>
+            </div>
+            <button class="modal-close" data-modal="modal-note">
+                <i data-lucide="x"></i>
+            </button>
+        </div>
+        <div class="modal-body">
+            <form id="form-note">
+                <input type="hidden" id="note-id" value="">
+                <div class="form-group">
+                    <label>Judul Catatan <span class="required">*</span></label>
+                    <input type="text" id="note-title" placeholder="Misal: SOP Marketing, Akun Tools, dll" required>
+                </div>
+                <div class="form-group">
+                    <label>Konten Catatan <span class="required">*</span></label>
+                    <textarea id="note-content" rows="8" placeholder="Tulis catatan lengkap di sini..." required style="font-family:'JetBrains Mono',monospace; font-size:0.85rem; line-height:1.7;"></textarea>
+                </div>
+                <div class="form-group">
+                    <label>Visibilitas</label>
+                    <div class="note-visibility-toggle">
+                        <button type="button" class="vis-btn active" data-vis="private" onclick="App.setNoteVisibility('private', this)">
+                            <i data-lucide="lock" style="width:12px;height:12px;"></i> Pribadi
+                        </button>
+                        <button type="button" class="vis-btn" data-vis="public" onclick="App.setNoteVisibility('public', this)">
+                            <i data-lucide="globe" style="width:12px;height:12px;"></i> Publik
+                        </button>
+                        <button type="button" class="vis-btn" data-vis="shared" onclick="App.setNoteVisibility('shared', this)">
+                            <i data-lucide="share-2" style="width:12px;height:12px;"></i> Berbagi
+                        </button>
+                    </div>
+                    <input type="hidden" id="note-visibility" value="private">
+                </div>
+                <div id="note-dept-selector" class="form-group hidden">
+                    <label>Pilih Divisi</label>
+                    <div class="note-dept-grid">
+                        <?php
+                        $departments = ['Advertiser','Design Grafis','Marketplace','Customer Service','Konten Video','Admin Order','HR','Finance','Gudang','Affiliate','Tech/Programmer'];
+                        foreach ($departments as $dept) {
+                            echo '<label class="note-dept-check"><input type="checkbox" value="'.htmlspecialchars($dept).'" class="note-dept-cb"> '.htmlspecialchars($dept).'</label>';
+                        }
+                        ?>
+                    </div>
+                </div>
+                <button type="submit" class="btn btn-primary btn-block" style="padding:14px; font-size:0.95rem; margin-top:12px;">
+                    <i data-lucide="check-circle-2" style="width:18px;height:18px;"></i>
+                    SIMPAN CATATAN
+                </button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Note Detail Modal (Read Full Content) -->
+    <div id="modal-note-detail" class="modal hidden">
+        <div class="modal-header" style="background:linear-gradient(135deg,#f0fdf4,#dcfce7); border-bottom:1px solid #bbf7d0;">
+            <div style="display:flex; align-items:center; gap:10px;">
+                <div id="note-detail-vis-icon" style="width:32px;height:32px;border-radius:8px;display:flex;align-items:center;justify-content:center;">
+                    <i data-lucide="sticky-note" style="width:16px;height:16px;"></i>
+                </div>
+                <div>
+                    <h3 id="note-detail-title" style="color:var(--slate-800); font-size:1rem; font-weight:700;">Detail Catatan</h3>
+                    <p id="note-detail-meta" style="font-size:0.7rem; color:var(--slate-500); margin-top:-2px;"></p>
+                </div>
+            </div>
+            <button class="modal-close" data-modal="modal-note-detail">
+                <i data-lucide="x"></i>
+            </button>
+        </div>
+        <div class="modal-body" style="padding:0;">
+            <div id="note-detail-body" class="note-detail-body">
+                <!-- Full content rendered here -->
+            </div>
+            <div id="note-detail-footer" class="note-detail-footer">
+                <!-- Author + actions rendered here -->
+            </div>
         </div>
     </div>
 

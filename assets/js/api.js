@@ -52,7 +52,9 @@ const API = {
     },
 
     async logout() {
-        return this.request('auth.php?action=logout');
+        return this.request('auth.php?action=logout', {
+            method: 'POST'
+        });
     },
 
     async checkAuth() {
@@ -225,6 +227,63 @@ const API = {
     async getWorkHistory(params = {}) {
         const query = new URLSearchParams(params).toString();
         return this.request(`history.php?action=list&${query}`);
+    },
+
+    // Announcements
+    async getAnnouncements(limit = 10) {
+        return this.request(`announcements.php?action=list&limit=${limit}`);
+    },
+
+    async createAnnouncement(data) {
+        return this.request('announcements.php?action=create', {
+            method: 'POST',
+            body: JSON.stringify(data)
+        });
+    },
+
+    async deleteAnnouncement(id) {
+        return this.request('announcements.php?action=delete', {
+            method: 'POST',
+            body: JSON.stringify({ id })
+        });
+    },
+
+    async getAnnouncementHistory(page = 1, perPage = 20) {
+        return this.request(`announcements.php?action=history&page=${page}&per_page=${perPage}`);
+    },
+
+    async acknowledgeAnnouncement(announcementId) {
+        return this.request('announcements.php?action=acknowledge', {
+            method: 'POST',
+            body: JSON.stringify({ announcement_id: announcementId })
+        });
+    },
+
+    // ========== NOTES / NOTEPAD ==========
+
+    async getNotes(filter = 'all', page = 1) {
+        return this.request(`notes.php?action=list&filter=${filter}&page=${page}`);
+    },
+
+    async createNote(data) {
+        return this.request('notes.php?action=create', {
+            method: 'POST',
+            body: JSON.stringify(data)
+        });
+    },
+
+    async updateNote(data) {
+        return this.request('notes.php?action=update', {
+            method: 'POST',
+            body: JSON.stringify(data)
+        });
+    },
+
+    async deleteNote(id) {
+        return this.request('notes.php?action=delete', {
+            method: 'POST',
+            body: JSON.stringify({ id })
+        });
     }
 };
 

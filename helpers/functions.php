@@ -20,24 +20,21 @@ set_exception_handler(function ($e) {
     error_log("Unhandled Exception: " . $e->getMessage() . " in " . $e->getFile() . ":" . $e->getLine());
     jsonResponse([
         'success' => false,
-        'message' => 'Internal Server Error: ' . $e->getMessage(),
-        'error_type' => get_class($e)
+        'message' => 'Internal Server Error'
     ], 500);
 });
 
 // Global Error Handler
 set_error_handler(function ($errno, $errstr, $errfile, $errline) {
     if (!(error_reporting() & $errno)) return false;
-    
+
     error_log("PHP Error [$errno]: $errstr in $errfile:$errline");
-    
-    // For fatal-like errors, return JSON
+
+    // For fatal-like errors, return generic JSON without internal details
     if (in_array($errno, [E_ERROR, E_USER_ERROR, E_RECOVERABLE_ERROR])) {
         jsonResponse([
             'success' => false,
-            'message' => "Fatal Error: $errstr",
-            'file' => basename($errfile),
-            'line' => $errline
+            'message' => 'Internal Server Error'
         ], 500);
     }
     return false;
@@ -50,8 +47,7 @@ register_shutdown_function(function () {
         error_log("Fatal Shutdown Error: " . $error['message']);
         jsonResponse([
             'success' => false,
-            'message' => 'Fatal Execution Error: ' . $error['message'],
-            'type' => $error['type']
+            'message' => 'Internal Server Error'
         ], 500);
     }
 });

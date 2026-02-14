@@ -13,6 +13,10 @@ const App = {
 
         if (!blocker) return;
 
+        // Initial load based on URL or default
+        // Check if we need to load a specific note from URL hash or param? 
+        // For now, default to timeline view.
+
         if (!("Notification" in window)) {
             // Browser doesn't support notifications, let it pass or warn?
             // For now let pass to avoid breaking purely
@@ -221,6 +225,9 @@ const App = {
             const option = select.options[select.selectedIndex];
             const staffName = option.textContent;
 
+            // Sanitize name for display
+            const safeName = this.escapeHtml(staffName.split(' (')[0]);
+
             // Add to state
             this.state[stateKey].push(userId);
 
@@ -240,7 +247,7 @@ const App = {
                 font-weight: 500;
             `;
             chip.innerHTML = `
-                <span>@${staffName.split(' (')[0]}</span>
+                <span>@${safeName}</span>
                 <button type="button" onclick="App.removeMention(${userId}, '${containerId}', '${stateKey}')" style="
                     background: rgba(255,255,255,0.3);
                     border: none;
@@ -299,6 +306,9 @@ const App = {
 
         // Ensure Lucide icons are ready
         this.initIcons();
+
+        // Initialize Mobile Nav
+        this.initMobileNav();
 
         // checkAuth will handle showing login or main app
         // and it will finally call hideLoading()
@@ -514,7 +524,11 @@ const App = {
         // Re-check on focus (in case user changed settings in another tab/window)
         window.addEventListener('focus', () => {
             this.checkNotificationBlocking();
+            this.checkAnnouncements(); // Re-check announcements on focus
         });
+
+        // Announcement Form
+        document.getElementById('form-create-announcement')?.addEventListener('submit', (e) => this.handleCreateAnnouncement(e));
     },
 
     // =========================================
@@ -599,6 +613,28 @@ const App = {
         }
 
         this.initDateFilterDismiss();
+        this.checkAnnouncements();
+        this.startAnnouncementRefresh();
+
+        // Announcement Button Visibility
+        const annBtn = document.getElementById('btn-create-announcement');
+        if (annBtn) {
+            if (this.state.user.role === 'Admin') {
+                annBtn.classList.remove('hidden');
+                annBtn.addEventListener('click', () => this.openAnnouncementCreator());
+            } else {
+                annBtn.classList.add('hidden');
+            }
+        }
+
+        // Announcement History Button (visible to all)
+        const annHistoryBtn = document.getElementById('btn-announcement-history');
+        if (annHistoryBtn) {
+            annHistoryBtn.addEventListener('click', () => this.openAnnouncementHistory());
+        }
+
+        // Initialize Notepad bindings
+        this.initNotepadBindings();
     },
 
     initDatePicker() {
@@ -672,10 +708,12 @@ const App = {
                 this.showMain();
                 if (window.NotificationManager) window.NotificationManager.init();
 
-                // Auto-generate routines for today
-                API.generateRoutines().catch(err => console.error('Auto-routine gen failed', err));
+                // Auto-generate routines for today (using client local date to avoid timezone drift)
+                const now = new Date();
+                const localDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+                API.generateRoutines(localDate).catch(err => console.error('Auto-routine gen failed', err));
 
-                this.populateDepartments();
+                // populateDepartments removed (logic moved to loadDepartments calls in showMain)
             } else {
                 this.showLogin();
             }
@@ -686,45 +724,7 @@ const App = {
         }
     },
 
-    async populateDepartments() {
-        try {
-            // Populate #dept-filter and user form #user-role
-            const res = await API.getDepartments();
-            if (res.departments) {
-                const depts = res.departments;
-
-                // 1. Dept Filter (Timeline)
-                const filterEl = document.getElementById('dept-filter');
-                if (filterEl) {
-                    const currentVal = filterEl.value;
-                    filterEl.innerHTML = '<option value="All">Semua Divisi</option>';
-                    depts.forEach(d => {
-                        const opt = document.createElement('option');
-                        opt.value = d;
-                        opt.textContent = d;
-                        filterEl.appendChild(opt);
-                    });
-                    filterEl.value = currentVal;
-                }
-
-                // 2. User Form Role Select
-                const roleEl = document.getElementById('user-role');
-                if (roleEl) {
-                    roleEl.innerHTML = '<option value="">Pilih Role...</option><option value="Admin">Admin</option>';
-                    depts.forEach(d => {
-                        const opt = document.createElement('option');
-                        opt.value = d;
-                        opt.textContent = d;
-                        roleEl.appendChild(opt);
-                    });
-                }
-
-                this.state.departments = depts;
-            }
-        } catch (e) {
-            console.error('Failed to load departments', e);
-        }
-    },
+    // populateDepartments removed/merged into loadDepartments
 
     async handleLogin() {
         const username = document.getElementById('login-username').value.trim();
@@ -945,22 +945,43 @@ const App = {
     },
 
     async loadDepartments() {
-        const select = this.els.deptFilter;
-        if (!select) return;
-
         try {
             const result = await API.getDepartments();
-            // Keep "All" option
-            select.innerHTML = '<option value="All">Semua Divisi</option>';
-            if (result.departments && result.departments.length > 0) {
-                result.departments.forEach(dept => {
+            const depts = result.departments || [];
+            this.state.departments = depts;
+
+            // 1. Dept Filter (Timeline)
+            const select = this.els.deptFilter;
+            if (select) {
+                const currentVal = select.value;
+                select.innerHTML = '<option value="All">Semua Divisi</option>';
+                depts.forEach(dept => {
                     select.innerHTML += `<option value="${this.escapeHtml(dept)}">${this.escapeHtml(dept)}</option>`;
                 });
+                select.value = currentVal; // Restore selection
             }
+
+            // 2. User Form Role Select
+            const roleEl = document.getElementById('user-role');
+            if (roleEl) {
+                // Preserve selection if possible, though usually it's empty on load
+                const currentRole = roleEl.value;
+                roleEl.innerHTML = '<option value="">Pilih Role...</option><option value="Admin">Admin</option>';
+                depts.forEach(d => {
+                    // Prevent XSS in values/text
+                    const safeD = this.escapeHtml(d);
+                    const opt = document.createElement('option');
+                    opt.value = safeD; // or d, assuming it's safe from API but good practice
+                    opt.textContent = safeD;
+                    roleEl.appendChild(opt);
+                });
+                if (currentRole) roleEl.value = currentRole;
+            }
+
         } catch (error) {
             console.error('Failed to load departments:', error);
             // Fallback UI - show only "All" option with error indication
-            select.innerHTML = '<option value="All">Semua Divisi (gagal memuat)</option>';
+            if (this.els.deptFilter) this.els.deptFilter.innerHTML = '<option value="All">Semua Divisi (gagal memuat)</option>';
             this.showToast('Gagal memuat daftar divisi', 'error');
         }
     },
@@ -984,6 +1005,14 @@ const App = {
         if (listContainer) listContainer.classList.add('hidden');
         if (historyContainer) historyContainer.classList.add('hidden');
 
+        // Also hide notepad view when switching sub-views (Bug 1 fix)
+        const notepadView = document.getElementById('notepad-view');
+        if (notepadView) notepadView.classList.add('hidden');
+        // Reset app-view-toggle back to timeline
+        document.querySelectorAll('.app-view-btn').forEach(btn => {
+            btn.classList.toggle('active', btn.dataset.appview === 'timeline');
+        });
+
         if (mode === 'list') {
             // LIST VIEW MODE
             if (listContainer) listContainer.classList.remove('hidden');
@@ -993,6 +1022,7 @@ const App = {
             if (dateLabel) dateLabel.style.display = 'none';
 
             this.loadListView();
+            this.currentView = 'list'; // Track current view
         } else if (mode === 'history') {
             // HISTORY VIEW MODE
             if (historyContainer) historyContainer.classList.remove('hidden');
@@ -1002,6 +1032,7 @@ const App = {
             if (dateLabel) dateLabel.style.display = 'none';
 
             this.loadHistoryView();
+            this.currentView = 'history';
         } else {
             // TIMELINE MODE (All / Me)
             if (timelineContainer) timelineContainer.classList.remove('hidden');
@@ -1011,7 +1042,9 @@ const App = {
             if (dateLabel) dateLabel.style.display = 'block';
 
             this.loadTimeline();
+            this.currentView = 'timeline';
         }
+        this.updateMobileActionBtn();
     },
 
     // =========================================
@@ -1090,7 +1123,7 @@ const App = {
         const monthName = date.toLocaleDateString('id-ID', { month: 'long', year: 'numeric' });
 
         // Header
-        let html = `<div class="calendar-header">${monthName}</div>`;
+        let html = `<div class="calendar-month-header">${monthName}</div>`;
 
         // Grid Header
         html += `<div class="calendar-grid">`;
@@ -1451,8 +1484,12 @@ const App = {
                 // Show staff name if "All" filter (Concise Mode: No Avatar)
                 let staffHtml = '';
                 if (this.state.listFilter === 'all') {
-                    staffHtml = `<span style="font-size:0.75rem; color:var(--primary); font-weight:600; background:var(--primary-light); padding:2px 6px; border-radius:4px; margin-right:6px;">${task.staff_name}</span>`;
+                    const safeStaffName = this.escapeHtml(task.staff_name);
+                    staffHtml = `<span style="font-size:0.75rem; color:var(--primary); font-weight:600; background:var(--primary-light); padding:2px 6px; border-radius:4px; margin-right:6px;">${safeStaffName}</span>`;
                 }
+
+                const safeTitle = this.escapeHtml(task.title);
+                const safeCategory = this.escapeHtml(task.category);
 
                 html += `
                     <div class="list-task-card ${isLate ? 'border-danger' : ''}" onclick="App.openTaskDetail(${task.id})">
@@ -1464,10 +1501,10 @@ const App = {
                         <div class="list-task-info">
                             <div class="list-task-header">
                                 ${staffHtml}
-                                <div class="list-task-title">${task.title}</div>
+                                <div class="list-task-title">${safeTitle}</div>
                             </div>
                             <div class="list-task-meta">
-                                <span><i data-lucide="tag"></i> ${task.category}</span>
+                                <span><i data-lucide="tag"></i> ${safeCategory}</span>
                                 <span class="list-task-status ${statusClass}">${statusClass.replace('-', ' ')}</span> 
                             </div>
                         </div>
@@ -1951,7 +1988,7 @@ const App = {
                     item.zIndex = 30 + indexInGroup;
                 } else {
                     // Standard Cascading for partial overlaps
-                    const indentPercent = 12; // Indent 12% per overlap level
+                    const indentPercent = 12; // Indent 12% per
                     const maxIndent = 60; // Max indentation to keep it visible
 
                     const indent = Math.min(item.colIndex * indentPercent, maxIndent);
@@ -2483,8 +2520,9 @@ const App = {
                 // Color logic
                 if (!this.editingTaskId && btn) {
                     btn.className = 'btn btn-block';
+                    btn.style.background = ''; // Clear any inline style from previous selection
                     if (val === 'Tugas Tambahan') btn.classList.add('btn-warning');
-                    else if (val === 'Inisiatif') btn.style.background = '#14b8a6';
+                    else if (val === 'Inisiatif') btn.classList.add('btn-success');
                     else btn.classList.add('btn-primary');
 
                     const span = btn.querySelector('span');
@@ -2515,7 +2553,7 @@ const App = {
         if (!this.state.tasks) return;
         const now = new Date();
         const currentMins = now.getHours() * 60 + now.getMinutes();
-        const todayStr = new Date().toLocaleDateString('sv').split('T')[0];
+        const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
 
         this.state.tasks.forEach(task => {
             if ((task.task_date || task.date) === todayStr && task.status !== 'done') {
@@ -2853,8 +2891,7 @@ const App = {
 
     getCategoryClass(cat) {
         if (!cat) return '';
-        if (cat === 'Tugas Tambahan') return 'tambahan';
-        return cat.toLowerCase().replace(' ', '-');
+        return cat.replace(/\s+/g, '-');
     },
 
     getCategoryIcon(cat) {
@@ -3123,7 +3160,8 @@ const App = {
         this.handleMentionSelect('request-mentions', 'request-mentions-selected', 'requestMentions');
 
         // Set Default Date
-        const today = new Date().toISOString().split('T')[0];
+        const now = new Date();
+        const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
         const defaultDate = this.state.selectedDate || today;
         document.getElementById('request-date').value = defaultDate;
 
@@ -3356,21 +3394,861 @@ const App = {
         const avatarEl = document.getElementById('drawer-avatar');
         if (avatarEl) {
             if (user.avatar) {
-                avatarEl.innerHTML = `<img src="${user.avatar}" style="width:100%;height:100%;object-fit:cover;border-radius:50%">`;
+                const safeAvatar = this.sanitizeUrl(user.avatar) || '';
+                avatarEl.innerHTML = `<img src="${safeAvatar}" style="width:100%;height:100%;object-fit:cover;border-radius:50%" onerror="this.src='https://ui-avatars.com/api/?name=${encodeURIComponent(user.name)}&background=random'">`;
             } else {
-                avatarEl.innerHTML = user.name.charAt(0).toUpperCase();
+                avatarEl.innerHTML = this.escapeHtml(user.name.charAt(0).toUpperCase());
             }
         }
-        document.getElementById('drawer-username').textContent = user.name;
-        document.getElementById('drawer-role').textContent = user.role;
+        const usernameEl = document.getElementById('drawer-username');
+        if (usernameEl) usernameEl.textContent = user.name;
+
+        const roleEl = document.getElementById('drawer-role');
+        if (roleEl) roleEl.textContent = user.role;
 
         // Show/Hide admin links
         const isAdmin = user.role === 'Admin';
-        document.getElementById('mobile-btn-users').classList.toggle('hidden', !isAdmin);
+        const usersBtn = document.getElementById('mobile-btn-users');
+        if (usersBtn) {
+            usersBtn.classList.toggle('hidden', !isAdmin);
+        }
 
         drawer.classList.add('active');
+    },
+    // =========================================
+    // ANNOUNCEMENTS
+    // =========================================
+
+    announcementRefreshInterval: null,
+    announcementHistoryPage: 1,
+
+    async checkAnnouncements() {
+        try {
+            const data = await API.getAnnouncements(10);
+            if (data.success && data.announcements && data.announcements.length > 0) {
+                // Render running text banner with ALL active announcements (within 1 week)
+                this.renderAnnouncementBanner(data.announcements);
+
+                // Check popup for unacknowledged announcements
+                const unacknowledged = data.announcements.filter(a => !a.is_acknowledged);
+                if (unacknowledged.length > 0) {
+                    this.showAnnouncementPopup(unacknowledged[0]);
+                }
+            } else {
+                this.hideAnnouncementBanner();
+            }
+        } catch (e) {
+            console.error('Failed to fetch announcements', e);
+        }
+    },
+
+    startAnnouncementRefresh() {
+        if (this.announcementRefreshInterval) clearInterval(this.announcementRefreshInterval);
+        this.announcementRefreshInterval = setInterval(() => {
+            this.checkAnnouncements();
+        }, 120000);
+    },
+
+    hideAnnouncementBanner() {
+        const banner = document.getElementById('announcement-banner');
+        if (banner) banner.classList.add('hidden');
+    },
+
+    dismissAnnouncementBanner(annId) {
+        sessionStorage.setItem('dismissed_announcement_banner', annId);
+        this.hideAnnouncementBanner();
+        this.adjustMainContentHeight();
+    },
+
+    adjustMainContentHeight() {
+        const banner = document.getElementById('announcement-banner');
+        const mainContent = document.querySelector('.main-content');
+        if (!mainContent) return;
+        const headerHeight = 64;
+        const bannerVisible = banner && !banner.classList.contains('hidden');
+        const bannerHeight = bannerVisible ? banner.offsetHeight : 0;
+        mainContent.style.height = `calc(100vh - ${headerHeight + bannerHeight}px)`;
+    },
+
+    renderAnnouncementBanner(announcements) {
+        const dismissedId = sessionStorage.getItem('dismissed_announcement_banner');
+        // If latest was dismissed in this session, hide
+        if (dismissedId == announcements[0].id) return;
+
+        let banner = document.getElementById('announcement-banner');
+        if (!banner) {
+            banner = document.createElement('div');
+            banner.id = 'announcement-banner';
+            banner.className = 'announcement-banner';
+            // Inject into main-content instead of body to avoid header overlap
+            const mainContent = document.querySelector('.main-content');
+            if (mainContent) {
+                mainContent.prepend(banner);
+            } else {
+                document.body.prepend(banner);
+            }
+        }
+
+        // Build marquee text from ALL announcements (within 1 week)
+        const marqueeSegments = announcements.map(ann => {
+            const safeTitle = this.escapeHtml(ann.title);
+            const safeMessage = this.escapeHtml(ann.message);
+            const safeSender = this.escapeHtml(ann.sender_name);
+            return `<strong>${safeTitle}</strong>: ${safeMessage} — Oleh ${safeSender} (${ann.date_formatted} ${ann.time_formatted})`;
+        }).join('  ●  ');
+
+        const marqueeContent = `<span class="announcement-info-label"><i data-lucide="megaphone" style="width:12px;height:12px;"></i> INFO PERUSAHAAN</span>  ●  ${marqueeSegments}`;
+
+        banner.innerHTML = `
+            <div class="announcement-banner-inner">
+                <div class="announcement-marquee-wrapper">
+                    <div class="announcement-marquee-track">
+                        <span class="announcement-marquee-text">
+                            ${marqueeContent}
+                        </span>
+                        <span class="announcement-marquee-text announcement-marquee-duplicate">
+                            ${marqueeContent}
+                        </span>
+                    </div>
+                </div>
+            </div>
+        `;
+        banner.classList.remove('hidden');
+        if (window.lucide) window.lucide.createIcons();
+        setTimeout(() => this.adjustMainContentHeight(), 50);
+    },
+
+    showAnnouncementPopup(ann) {
+        const modalId = 'modal-announcement-popup';
+        if (document.getElementById(modalId)) return;
+
+        const safeTitle = this.escapeHtml(ann.title);
+        const safeMessage = this.escapeHtml(ann.message);
+        const safeSender = this.escapeHtml(ann.sender_name);
+
+        const modalHtml = `
+            <div id="${modalId}" class="announcement-popup-overlay">
+                <div class="announcement-popup-card">
+                    <div class="announcement-popup-header">
+                        <div class="announcement-popup-icon-bg">
+                            <div class="announcement-popup-icon">
+                                <i data-lucide="megaphone" style="width:36px;height:36px;stroke-width:2.5;"></i>
+                            </div>
+                        </div>
+                        <p class="announcement-popup-label">PENGUMUMAN PERUSAHAAN</p>
+                        <h2 class="announcement-popup-title">${safeTitle}</h2>
+                    </div>
+                    <div class="announcement-popup-body">
+                        <p class="announcement-popup-message">"${safeMessage}"</p>
+                        <button onclick="App.acknowledgeAndDismissPopup(${ann.id})" class="announcement-popup-btn">
+                            SAYA MENGERTI
+                        </button>
+                        <p class="announcement-popup-meta">Disampaikan oleh: ${safeSender} • ${ann.date_formatted} ${ann.time_formatted}</p>
+                    </div>
+                </div>
+            </div>
+        `;
+        document.body.insertAdjacentHTML('beforeend', modalHtml);
+        if (window.lucide) window.lucide.createIcons();
+    },
+
+    async acknowledgeAndDismissPopup(announcementId) {
+        const modalId = 'modal-announcement-popup';
+        const modal = document.getElementById(modalId);
+        if (modal) modal.remove();
+
+        try {
+            await API.acknowledgeAnnouncement(announcementId);
+        } catch (e) {
+            console.error('Failed to acknowledge announcement', e);
+        }
+    },
+
+    openAnnouncementCreator() {
+        this.openModal('modal-create-announcement');
+    },
+
+    async handleCreateAnnouncement(e) {
+        e.preventDefault();
+        const title = document.getElementById('ann-title').value.trim();
+        const message = document.getElementById('ann-message').value.trim();
+        const btn = e.target.querySelector('button[type="submit"]');
+
+        if (!title || !message) {
+            this.showToast('Judul dan pesan wajib diisi', 'warning');
+            return;
+        }
+
+        try {
+            this.setButtonLoading(btn, true);
+            await API.createAnnouncement({ title, message });
+            this.showToast('Pengumuman berhasil dibuat & dikirim ke semua staff', 'success');
+            this.closeModal('modal-create-announcement');
+            document.getElementById('form-create-announcement').reset();
+            sessionStorage.removeItem('dismissed_announcement_banner');
+            this.checkAnnouncements();
+        } catch (err) {
+            this.showToast(err.message || 'Gagal membuat pengumuman', 'error');
+        } finally {
+            this.setButtonLoading(btn, false);
+        }
+    },
+
+    // =========================================
+    // ANNOUNCEMENT HISTORY LOG
+    // =========================================
+
+    openAnnouncementHistory() {
+        this.announcementHistoryPage = 1;
+        this.openModal('modal-announcement-history');
+        this.loadAnnouncementHistory();
+    },
+
+    async loadAnnouncementHistory(page = 1) {
+        this.announcementHistoryPage = page;
+        const container = document.getElementById('announcement-history-content');
+        if (!container) return;
+
+        container.innerHTML = `
+            <div style="text-align:center; padding:40px;">
+                <div class="loading-spinner" style="width:32px;height:32px;border-width:3px;margin:0 auto 12px;"></div>
+                <p style="color:var(--slate-400); font-size:0.8rem;">Memuat riwayat pengumuman...</p>
+            </div>
+        `;
+
+        try {
+            const data = await API.getAnnouncementHistory(page, 15);
+            if (!data.success) throw new Error(data.message);
+
+            const announcements = data.announcements || [];
+            const pagination = data.pagination || {};
+
+            if (announcements.length === 0) {
+                container.innerHTML = `
+                    <div class="ann-history-empty">
+                        <i data-lucide="megaphone" style="width:48px;height:48px;color:var(--slate-300);margin-bottom:12px;"></i>
+                        <p style="font-weight:600;color:var(--slate-500);">Belum Ada Pengumuman</p>
+                        <p style="font-size:0.8rem;color:var(--slate-400);">Pengumuman dari admin akan muncul di sini.</p>
+                    </div>
+                `;
+                if (window.lucide) window.lucide.createIcons();
+                return;
+            }
+
+            let html = '<div class="ann-history-list">';
+
+            announcements.forEach(ann => {
+                const safeTitle = this.escapeHtml(ann.title);
+                const safeMessage = this.escapeHtml(ann.message);
+                const safeSender = this.escapeHtml(ann.sender_name);
+                const relativeTime = this.escapeHtml(ann.relative_time || '');
+
+                const isOnBanner = ann.is_on_banner;
+                const isAcknowledged = ann.is_acknowledged;
+
+                html += `
+                    <div class="ann-history-item ${isOnBanner ? 'active' : 'expired'}">
+                        <div class="ann-history-item-left">
+                            <div class="ann-history-icon ${isOnBanner ? 'live' : 'past'}">
+                                <i data-lucide="${isOnBanner ? 'radio' : 'archive'}" style="width:18px;height:18px;"></i>
+                            </div>
+                        </div>
+                        <div class="ann-history-item-body">
+                            <div class="ann-history-item-top">
+                                <h4>${safeTitle}</h4>
+                                <div class="ann-history-badges">
+                                    ${isOnBanner ? '<span class="ann-badge-live"><i data-lucide="radio" style="width:10px;height:10px;"></i> AKTIF</span>' : '<span class="ann-badge-expired"><i data-lucide="archive" style="width:10px;height:10px;"></i> BERAKHIR</span>'}
+                                    ${isAcknowledged ? '<span class="ann-badge-read"><i data-lucide="check-circle-2" style="width:10px;height:10px;"></i> Sudah Dibaca</span>' : '<span class="ann-badge-unread"><i data-lucide="eye-off" style="width:10px;height:10px;"></i> Belum Dibaca</span>'}
+                                </div>
+                            </div>
+                            <p class="ann-history-message">${safeMessage}</p>
+                            <div class="ann-history-meta">
+                                <span><i data-lucide="user" style="width:12px;height:12px;"></i> ${safeSender}</span>
+                                <span><i data-lucide="calendar" style="width:12px;height:12px;"></i> ${ann.date_formatted} ${ann.time_formatted}</span>
+                                <span class="ann-history-relative">${relativeTime}</span>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            });
+
+            html += '</div>';
+
+            // Pagination
+            if (pagination.total_pages > 1) {
+                html += '<div class="ann-history-pagination">';
+
+                // Previous button
+                if (pagination.current_page > 1) {
+                    html += `<button onclick="App.loadAnnouncementHistory(${pagination.current_page - 1})" class="btn btn-outline btn-sm"><i data-lucide="chevron-left" style="width:14px;"></i> Sebelumnya</button>`;
+                }
+
+                html += `<span class="ann-history-page-info">Halaman ${pagination.current_page} dari ${pagination.total_pages}</span>`;
+
+                // Next button
+                if (pagination.current_page < pagination.total_pages) {
+                    html += `<button onclick="App.loadAnnouncementHistory(${pagination.current_page + 1})" class="btn btn-outline btn-sm">Selanjutnya <i data-lucide="chevron-right" style="width:14px;"></i></button>`;
+                }
+
+                html += '</div>';
+            }
+
+            container.innerHTML = html;
+            if (window.lucide) window.lucide.createIcons();
+        } catch (e) {
+            container.innerHTML = `
+                <div style="text-align:center; padding:40px; color:var(--danger);">
+                    <i data-lucide="alert-circle" style="width:32px;height:32px;margin-bottom:8px;"></i>
+                    <p>Gagal memuat riwayat: ${this.escapeHtml(e.message)}</p>
+                    <button onclick="App.loadAnnouncementHistory(${page})" class="btn btn-outline btn-sm" style="margin-top:12px;">Coba Lagi</button>
+                </div>
+            `;
+            if (window.lucide) window.lucide.createIcons();
+        }
+    },
+
+    // =====================================================
+    // NOTEPAD FEATURE
+    // =====================================================
+
+    // Current state for notepad
+    notepadState: {
+        currentFilter: 'all',
+        currentPage: 1,
+        notes: [],
+        isLoading: false
+    },
+
+    /**
+     * Switch between Timeline and Notepad views
+     */
+    setAppView(view) {
+        // Update toggle buttons
+        document.querySelectorAll('.app-view-btn').forEach(btn => {
+            btn.classList.toggle('active', btn.dataset.appview === view);
+        });
+
+        // Timeline-related elements
+        const timelineElements = [
+            document.querySelector('.page-header'),
+            document.getElementById('timeline-container'),
+            document.getElementById('list-view-container'),
+            document.getElementById('history-view-container')
+        ];
+
+        // Notepad element
+        const notepadView = document.getElementById('notepad-view');
+
+        if (view === 'notepad') {
+            // Hide all timeline elements
+            timelineElements.forEach(el => {
+                if (el) el.classList.add('hidden');
+            });
+            // Show notepad
+            if (notepadView) {
+                notepadView.classList.remove('hidden');
+                this.loadNotes();
+                this.currentView = 'notepad';
+            }
+        } else {
+            // Show timeline elements (restore previous view state)
+            const pageHeader = document.querySelector('.page-header');
+            if (pageHeader) pageHeader.classList.remove('hidden');
+
+            // Restore the active sub-view
+            const activeToggle = document.querySelector('.toggle-btn.active');
+            const activeSubView = activeToggle?.dataset?.view || 'all';
+
+            const timelineContainer = document.getElementById('timeline-container');
+            const listContainer = document.getElementById('list-view-container');
+            const historyContainer = document.getElementById('history-view-container');
+
+            if (activeSubView === 'list') {
+                if (timelineContainer) timelineContainer.classList.add('hidden');
+                if (listContainer) listContainer.classList.remove('hidden');
+                if (historyContainer) historyContainer.classList.add('hidden');
+            } else if (activeSubView === 'history') {
+                if (timelineContainer) timelineContainer.classList.add('hidden');
+                if (listContainer) listContainer.classList.add('hidden');
+                if (historyContainer) historyContainer.classList.remove('hidden');
+            } else {
+                if (timelineContainer) timelineContainer.classList.remove('hidden');
+                if (listContainer) listContainer.classList.add('hidden');
+                if (historyContainer) historyContainer.classList.add('hidden');
+            }
+
+            // Hide notepad
+            if (notepadView) notepadView.classList.add('hidden');
+            this.currentView = activeSubView; // Set current view to the restored sub-view
+        }
+
+        this.updateMobileActionBtn(); // Update mobile action button after view change
+        if (window.lucide) window.lucide.createIcons();
+    },
+
+    /**
+     * Update Mobile Action Button Label & Icon
+     */
+    updateMobileActionBtn() {
+        const btn = document.getElementById('mobile-action-btn');
+        const label = document.getElementById('mobile-action-label');
+        const icon = btn ? btn.querySelector('i[data-lucide]') : null;
+
+        if (!btn || !label || !icon) return;
+
+        if (this.currentView === 'notepad') {
+            label.textContent = 'Buat Catatan';
+            icon.setAttribute('data-lucide', 'plus-circle');
+        } else {
+            label.textContent = 'Tambah Pekerjaan';
+            icon.setAttribute('data-lucide', 'plus');
+        }
+        if (window.lucide) window.lucide.createIcons(); // Re-render icon
+    },
+
+    /**
+     * Handle Mobile Action Button Click
+     */
+    mobileActionClick() {
+        if (this.currentView === 'notepad') {
+            this.openNoteCreator();
+        } else {
+            // Default to opening add work modal for current user
+            this.openAddWorkForStaff(this.state.user.id);
+        }
+    },
+
+    /**
+     * Load notes from API
+     */
+    async loadNotes(filter, page) {
+        if (filter !== undefined) this.notepadState.currentFilter = filter;
+        if (page !== undefined) this.notepadState.currentPage = page;
+
+        const grid = document.getElementById('notepad-grid');
+        const loading = document.getElementById('notepad-loading');
+
+        if (!grid) return;
+
+        // Show loading
+        if (loading) loading.classList.remove('hidden');
+        grid.innerHTML = '';
+
+        try {
+            const res = await API.getNotes(this.notepadState.currentFilter, this.notepadState.currentPage);
+            if (res.success) {
+                this.notepadState.notes = res.notes;
+                this.renderNoteCards(res.notes);
+            } else {
+                grid.innerHTML = `
+                    <div class="notepad-empty">
+                        <div class="notepad-empty-icon"><i data-lucide="alert-circle"></i></div>
+                        <p>${this.escapeHtml(res.message || 'Gagal memuat catatan')}</p>
+                    </div>
+                `;
+            }
+        } catch (e) {
+            grid.innerHTML = `
+                <div class="notepad-empty">
+                    <div class="notepad-empty-icon"><i data-lucide="alert-circle"></i></div>
+                    <p>Error: ${this.escapeHtml(e.message)}</p>
+                </div>
+            `;
+        } finally {
+            if (loading) loading.classList.add('hidden');
+            if (window.lucide) window.lucide.createIcons();
+        }
+    },
+
+    /**
+     * Render note cards into the grid
+     */
+    renderNoteCards(notes) {
+        const grid = document.getElementById('notepad-grid');
+        if (!grid) return;
+
+        if (!notes || notes.length === 0) {
+            grid.innerHTML = `
+                <div class="notepad-empty">
+                    <div class="notepad-empty-icon"><i data-lucide="sticky-note"></i></div>
+                    <p>Belum ada catatan yang sesuai filter ini.</p>
+                </div>
+            `;
+            if (window.lucide) window.lucide.createIcons();
+            return;
+        }
+
+        let html = '';
+        notes.forEach(note => {
+            const safeTitle = this.escapeHtml(note.title);
+            const safeContent = this.escapeHtml(note.content);
+            const safeAuthor = this.escapeHtml(note.author_name);
+            const timeAgo = this.escapeHtml(note.time_ago || note.updated_formatted || '');
+
+            // Visibility badge
+            const visIcon = note.visibility === 'private' ? 'lock' : note.visibility === 'public' ? 'globe' : 'share-2';
+            const visLabel = note.visibility === 'private' ? 'Pribadi' : note.visibility === 'public' ? 'Publik' : 'Berbagi';
+
+            // Avatar
+            const avatarContent = note.author_avatar
+                ? `<img src="${this.escapeHtml(note.author_avatar)}" alt="${safeAuthor}">`
+                : safeAuthor.charAt(0).toUpperCase();
+
+            const noteIdSafe = parseInt(note.id);
+
+            // Actions (only for owner)
+            const actionsHtml = note.is_owner ? `
+                <div class="note-card-actions">
+                    <button class="note-action-edit" onclick="App.openNoteEditor(${noteIdSafe})" title="Edit">
+                        <i data-lucide="file-edit" style="width:14px;height:14px;"></i>
+                    </button>
+                    <button class="note-action-delete" onclick="App.deleteNote(${noteIdSafe})" title="Hapus">
+                        <i data-lucide="trash-2" style="width:14px;height:14px;"></i>
+                    </button>
+                </div>
+            ` : '';
+
+            // Shared depts tags
+            let sharedHtml = '';
+            if (note.visibility === 'shared' && note.shared_with_depts && note.shared_with_depts.length > 0) {
+                sharedHtml = `
+                    <div class="note-card-shared-depts">
+                        ${note.shared_with_depts.map(d => `<span class="note-dept-tag">${this.escapeHtml(d)}</span>`).join('')}
+                    </div>
+                `;
+            }
+
+            html += `
+                <div class="note-card" data-note-id="${noteIdSafe}" onclick="App.openNoteDetail(${noteIdSafe})">
+                    <div class="note-card-body">
+                        <div class="note-card-header">
+                            <span class="note-vis-badge ${note.visibility}">
+                                <i data-lucide="${visIcon}" style="width:10px;height:10px;"></i>
+                                ${visLabel}
+                            </span>
+                            ${actionsHtml}
+                        </div>
+                        <div class="note-card-title">${safeTitle}</div>
+                        <div class="note-card-content">${safeContent}</div>
+                    </div>
+                    <div class="note-card-footer">
+                        <div class="note-card-author">
+                            <div class="note-card-avatar">${avatarContent}</div>
+                            <span class="note-card-author-name">${safeAuthor}</span>
+                        </div>
+                        ${sharedHtml || `<span class="note-card-time">${timeAgo}</span>`}
+                    </div>
+                </div>
+            `;
+        });
+
+        grid.innerHTML = html;
+        if (window.lucide) window.lucide.createIcons();
+    },
+
+    /**
+     * Set notepad filter
+     */
+    setNotepadFilter(filter, btn) {
+        document.querySelectorAll('.notepad-filter-btn').forEach(b => b.classList.remove('active'));
+        if (btn) btn.classList.add('active');
+        this.loadNotes(filter, 1);
+    },
+
+    /**
+     * Set note visibility in modal
+     */
+    setNoteVisibility(vis, btn) {
+        document.querySelectorAll('.vis-btn').forEach(b => b.classList.remove('active'));
+        if (btn) {
+            btn.classList.add('active');
+        } else {
+            // Fallback: find button by data-vis attribute
+            document.querySelector(`.vis-btn[data-vis="${vis}"]`)?.classList.add('active');
+        }
+        document.getElementById('note-visibility').value = vis;
+
+        // Show/hide dept selector
+        const deptSelector = document.getElementById('note-dept-selector');
+        if (deptSelector) {
+            deptSelector.classList.toggle('hidden', vis !== 'shared');
+        }
+    },
+
+    /**
+     * Open note creator modal (create new)
+     */
+    openNoteCreator() {
+        document.getElementById('note-id').value = '';
+        document.getElementById('note-title').value = '';
+        document.getElementById('note-content').value = '';
+        document.getElementById('note-visibility').value = 'private';
+        document.getElementById('note-modal-title').textContent = 'Buat Catatan Baru';
+
+        // Reset visibility toggle
+        document.querySelectorAll('.vis-btn').forEach(b => b.classList.remove('active'));
+        document.querySelector('.vis-btn[data-vis="private"]')?.classList.add('active');
+
+        // Reset dept checkboxes
+        document.querySelectorAll('.note-dept-cb').forEach(cb => cb.checked = false);
+        document.getElementById('note-dept-selector')?.classList.add('hidden');
+
+        this.openModal('modal-note');
+        if (window.lucide) window.lucide.createIcons();
+    },
+
+    /**
+     * Open note editor modal (edit existing)
+     */
+    openNoteEditor(noteId) {
+        const note = this.notepadState.notes.find(n => n.id == noteId);
+        if (!note) return;
+
+        document.getElementById('note-id').value = note.id;
+        document.getElementById('note-title').value = note.title;
+        document.getElementById('note-content').value = note.content;
+        document.getElementById('note-visibility').value = note.visibility;
+        document.getElementById('note-modal-title').textContent = 'Edit Catatan';
+
+        // Set visibility toggle
+        document.querySelectorAll('.vis-btn').forEach(b => b.classList.remove('active'));
+        document.querySelector(`.vis-btn[data-vis="${note.visibility}"]`)?.classList.add('active');
+
+        // Set dept checkboxes
+        const sharedDepts = note.shared_with_depts || [];
+        document.querySelectorAll('.note-dept-cb').forEach(cb => {
+            cb.checked = sharedDepts.includes(cb.value);
+        });
+
+        // Show/hide dept selector
+        const deptSelector = document.getElementById('note-dept-selector');
+        if (deptSelector) deptSelector.classList.toggle('hidden', note.visibility !== 'shared');
+
+        this.openModal('modal-note');
+        if (window.lucide) window.lucide.createIcons();
+    },
+
+    /**
+     * Handle note form submit (create or update)
+     */
+    async handleNoteSubmit(e) {
+        e.preventDefault();
+
+        const id = document.getElementById('note-id').value;
+        const title = document.getElementById('note-title').value.trim();
+        const content = document.getElementById('note-content').value.trim();
+        const visibility = document.getElementById('note-visibility').value;
+
+        if (!title || !content) {
+            this.showToast('Judul dan konten wajib diisi', 'warning');
+            return;
+        }
+
+        // Disable submit button to prevent double-click
+        const submitBtn = e.target.querySelector('button[type="submit"]');
+        if (submitBtn) submitBtn.disabled = true;
+
+        // Get selected departments
+        const sharedWithDepts = [];
+        document.querySelectorAll('.note-dept-cb:checked').forEach(cb => {
+            sharedWithDepts.push(cb.value);
+        });
+
+        if (visibility === 'shared' && sharedWithDepts.length === 0) {
+            this.showToast('Pilih minimal satu divisi untuk berbagi', 'warning');
+            if (submitBtn) submitBtn.disabled = false;
+            return;
+        }
+
+        const data = { title, content, visibility, shared_with_depts: sharedWithDepts };
+
+        try {
+            let res;
+            if (id) {
+                data.id = parseInt(id);
+                res = await API.updateNote(data);
+            } else {
+                res = await API.createNote(data);
+            }
+
+            if (res.success) {
+                this.showToast(res.message, 'success');
+                this.closeModal('modal-note');
+                this.loadNotes(); // Reload notes
+            } else {
+                this.showToast(res.message || 'Gagal menyimpan catatan', 'error');
+            }
+        } catch (e) {
+            this.showToast('Error: ' + e.message, 'error');
+        } finally {
+            // Re-enable submit button
+            if (submitBtn) submitBtn.disabled = false;
+        }
+    },
+
+    /**
+     * Delete a note with confirmation
+     */
+    async deleteNote(noteId) {
+        if (!confirm('Hapus catatan ini? Tindakan tidak dapat dibatalkan.')) return;
+
+        try {
+            const res = await API.deleteNote(noteId);
+            if (res.success) {
+                this.showToast(res.message, 'success');
+                this.loadNotes(); // Reload
+            } else {
+                this.showToast(res.message, 'error');
+            }
+        } catch (e) {
+            this.showToast('Error: ' + e.message, 'error');
+        }
+    },
+
+    /**
+     * Open note detail modal to view full content
+     */
+    openNoteDetail(noteId) {
+        const note = this.notepadState.notes.find(n => n.id == noteId);
+        if (!note) return;
+
+        const safeTitle = this.escapeHtml(note.title);
+        const safeContent = this.escapeHtml(note.content);
+        const safeAuthor = this.escapeHtml(note.author_name);
+        const timeAgo = this.escapeHtml(note.time_ago || note.updated_formatted || '');
+        const createdAt = this.escapeHtml(note.created_formatted || '');
+
+        // Set header title
+        document.getElementById('note-detail-title').textContent = note.title;
+
+        // Set visibility icon style + meta
+        const visIcon = document.getElementById('note-detail-vis-icon');
+        if (note.visibility === 'private') {
+            visIcon.style.background = 'var(--slate-100)';
+            visIcon.innerHTML = '<i data-lucide="lock" style="width:16px;height:16px;color:var(--slate-500);"></i>';
+            document.getElementById('note-detail-meta').textContent = 'Catatan Pribadi';
+        } else if (note.visibility === 'public') {
+            visIcon.style.background = '#ecfdf5';
+            visIcon.innerHTML = '<i data-lucide="globe" style="width:16px;height:16px;color:#059669;"></i>';
+            document.getElementById('note-detail-meta').textContent = 'Catatan Publik';
+        } else {
+            visIcon.style.background = '#eff6ff';
+            visIcon.innerHTML = '<i data-lucide="share-2" style="width:16px;height:16px;color:#2563eb;"></i>';
+            document.getElementById('note-detail-meta').textContent = 'Berbagi ke divisi tertentu';
+        }
+
+        // Build body content
+        let bodyHtml = '';
+
+        // Shared depts tags at top
+        if (note.visibility === 'shared' && note.shared_with_depts && note.shared_with_depts.length > 0) {
+            bodyHtml += `<div class="note-detail-shared-depts">`;
+            note.shared_with_depts.forEach(d => {
+                bodyHtml += `<span class="note-dept-tag">${this.escapeHtml(d)}</span>`;
+            });
+            bodyHtml += `</div>`;
+        }
+
+        // Full content
+        bodyHtml += `<div style="padding:24px; white-space:pre-wrap; word-wrap:break-word; font-size:0.9rem; line-height:1.8; color:var(--slate-700);">${safeContent}</div>`;
+
+        document.getElementById('note-detail-body').innerHTML = bodyHtml;
+
+        // Build footer
+        const avatarContent = note.author_avatar
+            ? `<img src="${this.escapeHtml(note.author_avatar)}" alt="${safeAuthor}">`
+            : safeAuthor.charAt(0).toUpperCase();
+
+        let footerHtml = `
+            <div class="note-detail-author">
+                <div class="note-detail-avatar">${avatarContent}</div>
+                <div class="note-detail-author-info">
+                    <span class="note-detail-author-name">${safeAuthor}</span>
+                    <span class="note-detail-author-time">${createdAt} · ${timeAgo}</span>
+                </div>
+            </div>
+        `;
+
+        // Action buttons for owner
+        if (note.is_owner) {
+            footerHtml += `
+                <div class="note-detail-actions">
+                    <button class="btn btn-outline btn-sm" onclick="App.closeModal('modal-note-detail'); App.openNoteEditor(${note.id});">
+                        <i data-lucide="file-edit" style="width:14px;height:14px;"></i>
+                        Edit
+                    </button>
+                    <button class="btn btn-sm" style="background:#fef2f2;color:#ef4444;border:1px solid #fecaca;" onclick="App.closeModal('modal-note-detail'); App.deleteNote(${note.id});">
+                        <i data-lucide="trash-2" style="width:14px;height:14px;"></i>
+                        Hapus
+                    </button>
+                </div>
+            `;
+        }
+
+        document.getElementById('note-detail-footer').innerHTML = footerHtml;
+
+        this.openModal('modal-note-detail');
+        if (window.lucide) window.lucide.createIcons();
+    },
+
+    /**
+     * Initialize notepad event bindings
+     */
+    initNotepadBindings() {
+        // Create note button
+        const btnCreate = document.getElementById('btn-create-note');
+        if (btnCreate) {
+            btnCreate.addEventListener('click', () => this.openNoteCreator());
+        }
+
+        // Note form submit
+        const formNote = document.getElementById('form-note');
+        if (formNote) {
+            formNote.addEventListener('submit', (e) => this.handleNoteSubmit(e));
+        }
+
+        // Stop edit/delete buttons from triggering card click (detail modal)
+        document.addEventListener('click', (e) => {
+            if (e.target.closest('.note-action-edit') || e.target.closest('.note-action-delete')) {
+                e.stopPropagation();
+            }
+        }, true); // capture phase
+    },
+
+    /**
+     * Initialize Mobile Navigation
+     */
+    initMobileNav() {
+        const burger = document.getElementById('mobile-burger-btn');
+        const drawer = document.getElementById('mobile-menu-drawer');
+        const closeBtn = document.querySelector('.drawer-close');
+
+        if (burger && drawer) {
+            burger.addEventListener('click', (e) => {
+                e.stopPropagation();
+                drawer.classList.add('active');
+            });
+        }
+
+        if (closeBtn && drawer) {
+            closeBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                drawer.classList.remove('active');
+            });
+        }
+
+        // Close on outside click
+        if (drawer) {
+            drawer.addEventListener('click', (e) => {
+                if (e.target === drawer) {
+                    drawer.classList.remove('active');
+                }
+            });
+        }
     }
 };
 
+// Export for use in other modules
 window.App = App;
 document.addEventListener('DOMContentLoaded', () => App.init());
+
